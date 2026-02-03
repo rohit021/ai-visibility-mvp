@@ -1,0 +1,136 @@
+{
+  "info": {
+    "name": "AI Visibility Tool - MVP",
+    "description": "Complete API testing collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@amity.edu\",\n  \"password\": \"password123\",\n  \"fullName\": \"Amity Admin\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/register", "host": ["{{baseUrl}}"], "path": ["auth", "register"] }
+          }
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@amity.edu\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] }
+          }
+        },
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/auth/profile", "host": ["{{baseUrl}}"], "path": ["auth", "profile"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Colleges",
+      "item": [
+        {
+          "name": "Create College",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"collegeName\": \"Amity University Gurugram\",\n  \"city\": \"Gurugram\",\n  \"state\": \"Haryana\",\n  \"website\": \"https://www.amity.edu\",\n  \"nirfRank\": 55,\n  \"programs\": [\"BTech\", \"MBA\", \"BBA\"],\n  \"specializations\": [\"CSE\", \"ECE\", \"Mechanical\"]\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/colleges", "host": ["{{baseUrl}}"], "path": ["colleges"] }
+          }
+        },
+        {
+          "name": "Get All Colleges",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/colleges", "host": ["{{baseUrl}}"], "path": ["colleges"] }
+          }
+        },
+        {
+          "name": "Add Competitor",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"competitorCollegeName\": \"SRM University Delhi NCR\",\n  \"competitorCity\": \"Sonepat\",\n  \"competitorNirfRank\": 42\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/colleges/{{collegeId}}/competitors", "host": ["{{baseUrl}}"], "path": ["colleges", "{{collegeId}}", "competitors"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "AI Queries",
+      "item": [
+        {
+          "name": "Execute Queries",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/ai-queries/execute/{{collegeId}}", "host": ["{{baseUrl}}"], "path": ["ai-queries", "execute", "{{collegeId}}"] }
+          }
+        },
+        {
+          "name": "Get Query History",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/ai-queries/{{collegeId}}", "host": ["{{baseUrl}}"], "path": ["ai-queries", "{{collegeId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "item": [
+        {
+          "name": "Get Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/dashboard/{{collegeId}}", "host": ["{{baseUrl}}"], "path": ["dashboard", "{{collegeId}}"] }
+          }
+        },
+        {
+          "name": "Calculate Score",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/analytics/calculate/{{collegeId}}", "host": ["{{baseUrl}}"], "path": ["analytics", "calculate", "{{collegeId}}"] }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000/api" },
+    { "key": "token", "value": "your_token_here" },
+    { "key": "collegeId", "value": "1" }
+  ]
+}
