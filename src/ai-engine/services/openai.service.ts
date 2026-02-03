@@ -20,13 +20,14 @@ export class OpenAIService {
     response?: string;
     error?: string;
   }> {
+    console.log("GROQ API KEY is", this.groqApiKey);
     try {
       this.logger.log(`Executing query via Groq: ${prompt.substring(0, 50)}...`);
 
       const response = await axios.post(
         this.groqApiUrl,
         {
-          model: 'llama-3.1-70b-versatile', // FREE Groq model
+          model: 'llama-3.1-8b-instant', // FREE Groq model
           messages: [
             {
               role: 'system',
@@ -59,10 +60,11 @@ export class OpenAIService {
         response: aiResponse,
       };
     } catch (error) {
-      this.logger.error(`Groq API error: ${error.message}`);
+      // console.log("error is", error)
+      this.logger.error(`Groq API error: ${error.response.data.error.message}`);
       return {
         success: false,
-        error: error.message,
+        error: error.response.data.error.message,
       };
     }
   }

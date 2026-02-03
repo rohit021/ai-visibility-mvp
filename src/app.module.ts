@@ -11,7 +11,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
-    // Configuration
+    // Configuration FIRST (very important!)
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
@@ -26,8 +26,8 @@ import { DashboardModule } from './dashboard/dashboard.module';
       password: process.env.DB_PASSWORD || '',
       database: process.env.DB_NAME || 'college_ai_visibility',
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
-      synchronize: false, // Set to false in production
-      logging: process.env.NODE_ENV === 'development',
+      synchronize: false,
+      logging: false,
     }),
 
     // Scheduling
