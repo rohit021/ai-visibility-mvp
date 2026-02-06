@@ -15,68 +15,75 @@ export class ResponseParserService {
 
   parseResponse(response: string, knownColleges: string[]): ParsedResponse {
     this.logger.log('Parsing AI response for college mentions...');
+    console.log('\n🔍 PARSING RESPONSE FOR COLLEGES:', knownColleges);
+    console.log('\n📄 RESPONSE TO PARSE:\n', response.substring(0, 500));
 
-    const collegesFound: Array<{ name: string; rank: number; context: string }> =
-      [];
-    const lines = response.split('\n');
+    const collegesFound: Array<{ name: string; rank: number; context: string }> = [];
+    
+    // Split response into lines
+    const lines = response.split('\n').filter(line => line.trim().length > 0);
 
-    // Pattern 1: Numbered lists (1. College Name, 2. College Name)
-    const numberedPattern = /^\s*(\d+)\.\s*(.+)/;
-
-    // Pattern 2: Bullet points (- College Name, • College Name)
-    const bulletPattern = /^\s*[-•]\s*(.+)/;
+    // Pattern to match numbered lists: "1. College Name" or "1) College Name"
+    const numberedPattern = /^\s*(\d+)[\.\)]\s*\*?\*?(.+?)(?:\*\*)?[\s:-]/;
 
     let currentRank = 0;
 
-    for (const line of lines) {
-      const trimmedLine = line.trim();
-
-      if (!trimmedLine) continue;
-
-      // Check numbered pattern
-      const numberedMatch = trimmedLine.match(numberedPattern);
-      if (numberedMatch) {
-        currentRank = parseInt(numberedMatch[1]);
-        const collegeName = this.extractCollegeName(
-          numberedMatch[2],
-          knownColleges,
-        );
-
-        if (collegeName) {
-          collegesFound.push({
-            name: collegeName,
-            rank: currentRank,
-            context: this.extractContext(line, lines),
-          });
-        }
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      // Skip empty lines or section headers
+      if (!line || line.match(/^[*#_-]+/) || line.length < 10) {
         continue;
       }
 
-      // Check bullet pattern
-      const bulletMatch = trimmedLine.match(bulletPattern);
-      if (bulletMatch) {
-        currentRank++;
-        const collegeName = this.extractCollegeName(
-          bulletMatch[1],
-          knownColleges,
-        );
-
-        if (collegeName) {
-          collegesFound.push({
-            name: collegeName,
-            rank: currentRank,
-            context: this.extractContext(line, lines),
-          });
+      // Try to match numbered pattern
+      const match = line.match(numberedPattern);
+      
+      if (match) {
+        currentRank = parseInt(match[1]);
+        const collegeLine = match[2].trim();
+        
+        // Clean up the college name (remove markdown, special chars)
+        const cleanedName = this.cleanCollegeName(collegeLine);
+        
+        console.log(`\n✓ Found ranked entry #${currentRank}: "${cleanedName}"`);
+        
+        // Check if this matches any known college
+        const matchedCollege = this.findMatchingCollege(cleanedName, knownColleges);
+        
+        if (matchedCollege) {
+          // Get context (current line + next line)
+          const context = this.extractContext(i, lines);
+          
+          // Check if we already added this college
+          const alreadyAdded = collegesFound.find(c => 
+            c.name.toLowerCase() === matchedCollege.toLowerCase()
+          );
+          
+          if (!alreadyAdded) {
+            console.log(`   ✅ MATCHED to known college: "${matchedCollege}"`);
+            collegesFound.push({
+              name: matchedCollege,
+              rank: currentRank,
+              context: context,
+            });
+          } else {
+            console.log(`   ⚠️  Already added, skipping duplicate`);
+          }
+        } else {
+          console.log(`   ❌ No match in known colleges list`);
         }
       }
     }
 
-    // If no structured list found, search for college names in text
+    // If no structured matches found, try fallback search
     if (collegesFound.length === 0) {
+      console.log('\n⚠️  No structured matches found. Trying fallback search...');
       collegesFound.push(...this.fallbackExtraction(response, knownColleges));
     }
 
-    this.logger.log(`Found ${collegesFound.length} colleges in response`);
+    console.log(`\n✅ FINAL RESULT: Found ${collegesFound.length} colleges`);
+    collegesFound.forEach(c => console.log(`   - ${c.name} (Rank: ${c.rank})`));
 
     return {
       collegesFound,
@@ -84,69 +91,104 @@ export class ResponseParserService {
     };
   }
 
-  private extractCollegeName(text: string, knownColleges: string[]): string | null {
-    // Clean text
-    const cleanText = text
-      .replace(/[*_`]/g, '') // Remove markdown
-      .replace(/\([^)]*\)/g, '') // Remove parentheses content
+  private cleanCollegeName(text: string): string {
+    return text
+      .replace(/\*\*/g, '') // Remove bold markdown
+      .replace(/\*/g, '')   // Remove italic markdown
+      .replace(/\[|\]/g, '') // Remove brackets
+      .replace(/\(.*?\)/g, '') // Remove content in parentheses
+      .split('-')[0]  // Take only text before dash
+      .split('–')[0]  // Take only text before en-dash
+      .split(':')[0]  // Take only text before colon
       .trim();
+  }
 
-    // Check if any known college name appears in text
+  private findMatchingCollege(text: string, knownColleges: string[]): string | null {
+    const textLower = text.toLowerCase();
+    
+    // First, try exact match
     for (const college of knownColleges) {
-      if (cleanText.toLowerCase().includes(college.toLowerCase())) {
-        return college;
-      }
-
-      // Check for partial matches (e.g., "Amity" matches "Amity University Gurugram")
-      const collegeWords = college.toLowerCase().split(' ');
-      const textLower = cleanText.toLowerCase();
-
-      if (
-        collegeWords.some((word) => word.length > 3 && textLower.includes(word))
-      ) {
+      if (textLower === college.toLowerCase()) {
         return college;
       }
     }
-
+    
+    // Then try if the text contains the full college name
+    for (const college of knownColleges) {
+      if (textLower.includes(college.toLowerCase())) {
+        return college;
+      }
+    }
+    
+    // Then try if college name contains the text
+    for (const college of knownColleges) {
+      if (college.toLowerCase().includes(textLower)) {
+        return college;
+      }
+    }
+    
+    // Finally, try partial word matching (at least 2 significant words match)
+    for (const college of knownColleges) {
+      const collegeWords = college.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+      const textWords = textLower.split(/\s+/).filter(w => w.length > 3);
+      
+      let matchCount = 0;
+      for (const word of collegeWords) {
+        if (textWords.some(tw => tw.includes(word) || word.includes(tw))) {
+          matchCount++;
+        }
+      }
+      
+      // If at least 2 significant words match, consider it a match
+      if (matchCount >= 2) {
+        return college;
+      }
+    }
+    
     return null;
   }
 
-  private extractContext(line: string, allLines: string[]): string {
-    const lineIndex = allLines.indexOf(line);
-
-    // Get current line + next 2 lines as context
-    const contextLines = allLines.slice(lineIndex, lineIndex + 3);
-
+  private extractContext(currentIndex: number, lines: string[]): string {
+    // Get current line and next 2 lines as context
+    const contextLines = lines.slice(currentIndex, currentIndex + 3);
+    
     return contextLines
       .join(' ')
-      .replace(/[*_`]/g, '')
+      .replace(/\*\*/g, '')
+      .replace(/\*/g, '')
       .trim()
-      .substring(0, 500); // Limit to 500 chars
+      .substring(0, 300); // Limit to 300 chars
   }
 
   private fallbackExtraction(
     response: string,
     knownColleges: string[],
   ): Array<{ name: string; rank: number; context: string }> {
+    console.log('\n🔍 FALLBACK EXTRACTION - Searching entire text');
+    
     const found: Array<{ name: string; rank: number; context: string }> = [];
     const responseLower = response.toLowerCase();
 
-    knownColleges.forEach((college, index) => {
-      if (responseLower.includes(college.toLowerCase())) {
-        // Find position in text
-        const position = responseLower.indexOf(college.toLowerCase());
+    for (const college of knownColleges) {
+      const collegeLower = college.toLowerCase();
+      
+      // Check if college name appears in response
+      if (responseLower.includes(collegeLower)) {
+        const position = responseLower.indexOf(collegeLower);
         const context = response.substring(
           Math.max(0, position - 100),
           Math.min(response.length, position + 200),
         );
 
+        console.log(`   ✓ Found "${college}" in text`);
+
         found.push({
           name: college,
-          rank: index + 1,
+          rank: found.length + 1,
           context: context.trim(),
         });
       }
-    });
+    }
 
     return found;
   }

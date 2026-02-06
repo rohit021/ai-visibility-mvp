@@ -59,60 +59,96 @@ export class QueryExecutorService {
     let failCount = 0;
 
     // Execute each prompt
-    for (const prompt of prompts) {
-      try {
-        // Resolve placeholders
-        const resolvedPrompt = this.resolvePlaceholders(
-          prompt.promptText,
-          college,
-        );
+for (const prompt of prompts) {
+  try {
+    // Resolve placeholders
+    const resolvedPrompt = this.resolvePlaceholders(
+      prompt.promptText,
+      college,
+    );
 
-        // Execute query
-        const result = await this.openaiService.executeQuery(resolvedPrompt);
+    console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    console.log(`📝 PROMPT: ${resolvedPrompt}`);
+    console.log(`🏫 YOUR COLLEGE: ${college.collegeName}`);
+    console.log(`🎯 COMPETITORS: ${knownColleges.join(', ')}`);
 
-        if (result.success) {
-          // Parse response
-          const parsed = this.parserService.parseResponse(
-            result.response,
-            knownColleges,
-          );
+    // Execute query
+    const result = await this.openaiService.executeQuery(resolvedPrompt);
 
-          // Find your college in results
-          const yourCollege = parsed.collegesFound.find(
-            (c) => c.name.toLowerCase() === college.collegeName.toLowerCase(),
-          );
+    if (result.success) {
+      console.log(`\n✅ Query successful!`);
+      
+      // Parse response
+      const parsed = this.parserService.parseResponse(
+        result.response,
+        knownColleges,
+      );
+      console.log("paresed colleges found", parsed.collegesFound);
 
-          // Extract competitor data
-          const competitorsFound = parsed.collegesFound
-            .filter(
-              (c) => c.name.toLowerCase() !== college.collegeName.toLowerCase(),
-            )
-            .map((c) => ({
-              name: c.name,
-              rank: c.rank,
-              context: c.context,
-            }));
+      console.log(`\n📊 PARSING RESULTS:`);
+      console.log(`   Total colleges found: ${parsed.totalColleges}`);
+      console.log(`   Colleges: ${parsed.collegesFound.map(c => c.name).join(', ')}`);
 
-          // Save to database
-          await this.queryRepo.save({
-            collegeId,
-            promptId: prompt.id,
-            promptText: resolvedPrompt,
-            aiEngine: 'chatgpt',
-            executedAt: new Date(),
-            executionStatus: 'success',
-            rawResponse: result.response,
-            collegesMentioned: parsed.collegesFound.map((c) => c.name),
-            yourCollegeMentioned: !!yourCollege,
-            yourCollegeRank: yourCollege?.rank || null,
-            yourCollegeContext: yourCollege?.context || null,
-            competitorsMentioned: competitorsFound,
-            responseLength: result.response.length,
-            totalCollegesInResponse: parsed.totalColleges,
-          });
+      // Find your college in results
+      const yourCollege = parsed.collegesFound.find(
+        (c) => c.name.toLowerCase() === college.collegeName.toLowerCase(),
+      );
 
-          successCount++;
-        } else {
+      console.log(`\n🏆 YOUR COLLEGE MENTIONED: ${!!yourCollege ? 'YES ✓' : 'NO ✗'}`);
+      if (yourCollege) {
+        console.log(`   Rank: #${yourCollege.rank}`);
+      }
+
+      // Extract competitor data
+      // Extract competitor data - ONLY competitors, not your college
+const competitorsFound = parsed.collegesFound
+  .filter(
+    (c) => c.name.toLowerCase() !== college.collegeName.toLowerCase(),
+  )
+  .map((c) => ({
+    name: c.name,
+    rank: c.rank,
+    context: c.context,
+  }));
+
+console.log(`\n🎯 COMPETITORS FOUND: ${competitorsFound.length}`);
+competitorsFound.forEach(comp => {
+  console.log(`   - ${comp.name} (Rank: ${comp.rank})`);
+});
+
+// Get ALL college names mentioned (for colleges_mentioned field)
+const allCollegeNames = parsed.collegesFound.map((c) => c.name);
+
+console.log(`\n📋 ALL COLLEGES MENTIONED IN RESPONSE:`);
+allCollegeNames.forEach(name => console.log(`   - ${name}`));
+
+// Save to database
+const savedQuery = await this.queryRepo.save({
+  collegeId,
+  promptId: prompt.id,
+  promptText: resolvedPrompt,
+  aiEngine: 'chatgpt',
+  executedAt: new Date(),
+  executionStatus: 'success',
+  rawResponse: result.response,
+  collegesMentioned: allCollegeNames, // ✅ ALL colleges found in response
+  yourCollegeMentioned: !!yourCollege,
+  yourCollegeRank: yourCollege?.rank || null,
+  yourCollegeContext: yourCollege?.context || null,
+  competitorsMentioned: competitorsFound, // ✅ Only competitors (excluding your college)
+  responseLength: result.response.length,
+  totalCollegesInResponse: parsed.totalColleges,
+});
+
+console.log(`\n💾 Saved to database!`);
+console.log(`   Query ID: ${savedQuery.id}`);
+console.log(`   Colleges mentioned: [${allCollegeNames.join(', ')}]`);
+console.log(`   Competitors mentioned: [${competitorsFound.map(c => c.name).join(', ')}]`);
+
+      successCount++;
+      console.log(`\n💾 Saved to database successfully!`);
+    }
+    else {
           // Save failed query
           await this.queryRepo.save({
             collegeId,
