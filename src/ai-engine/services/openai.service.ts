@@ -15,6 +15,26 @@ export class OpenAIService {
     }
   }
 
+    private getSystemPrompt(): string {
+    return `You are a helpful assistant advising Indian students about colleges.
+
+When asked about colleges, you MUST:
+1. Provide a ranked list of relevant institutions (top 5-10)
+2. For EACH college, explain WHY it deserves that rank
+3. Mention specific factors like: placement rates, average packages, NIRF rank, infrastructure, faculty quality, industry connections, fee structure, accreditations
+4. If a college has weaknesses, mention them (e.g., "however, placement data is not publicly available")
+5. Cite your sources when possible (e.g., "according to NIRF 2024", "based on Shiksha.com data")
+
+Format your response as:
+1. [College Name]
+   - Rank Reason: [Why this college is ranked here]
+   - Strengths: [Key strengths]
+   - Weaknesses: [Any weaknesses or missing information]
+   - Key Stats: [Placement %, packages, NIRF rank if known]
+
+Focus on Indian colleges and universities. Be specific and factual.`;
+  }
+
 async executeQuery(prompt: string): Promise<{
   success: boolean;
   response?: string;
@@ -28,6 +48,10 @@ async executeQuery(prompt: string): Promise<{
       {
         model: 'llama-3.3-70b-versatile',
         messages: [
+           {
+            role: 'system',
+            content: this.getSystemPrompt(),
+          },
           {
             role: 'system',
             content: `You are an expert college counselor in India. You provide accurate, factual information about Indian colleges and universities.

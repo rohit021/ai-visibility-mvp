@@ -8,6 +8,7 @@ import { PromptsModule } from './prompts/prompts.module';
 import { AiEngineModule } from './ai-engine/ai-engine.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { RecommendationsModule } from './recommendations/recommendations.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     AiEngineModule,
     AnalyticsModule,
     DashboardModule,
+    RecommendationsModule,
   ],
 })
 export class AppModule {}
