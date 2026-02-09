@@ -71,7 +71,7 @@ export class QueryExecutorService {
         const result = await this.openaiService.executeQuery(resolvedPrompt);
 
         if (result.success) {
-          // Parse response
+          // Parse response with enhanced parsing
           const parsed = this.parserService.parseResponse(
             result.response,
             knownColleges,
@@ -82,7 +82,7 @@ export class QueryExecutorService {
             (c) => c.name.toLowerCase() === college.collegeName.toLowerCase(),
           );
 
-          // Extract competitor data
+          // Extract competitor data with full insights
           const competitorsFound = parsed.collegesFound
             .filter(
               (c) => c.name.toLowerCase() !== college.collegeName.toLowerCase(),
@@ -91,13 +91,16 @@ export class QueryExecutorService {
               name: c.name,
               rank: c.rank,
               context: c.context,
+              reasoning: c.reasoning,
+              strengths: c.strengths,
             }));
 
-          // Save to database
+          // Save to database with new fields
           await this.queryRepo.save({
             collegeId,
             promptId: prompt.id,
             promptText: resolvedPrompt,
+            promptCategory: prompt.category,
             aiEngine: 'chatgpt',
             executedAt: new Date(),
             executionStatus: 'success',
@@ -106,7 +109,12 @@ export class QueryExecutorService {
             yourCollegeMentioned: !!yourCollege,
             yourCollegeRank: yourCollege?.rank || null,
             yourCollegeContext: yourCollege?.context || null,
+            yourCollegeReasoning: yourCollege?.reasoning || null,
+            yourCollegeStrengths: yourCollege?.strengths || [],
+            yourCollegeWeaknesses: yourCollege?.weaknesses || [],
             competitorsMentioned: competitorsFound,
+            sourcesCited: parsed.sourcesCited,
+            rankingFactors: parsed.rankingFactors,
             responseLength: result.response.length,
             totalCollegesInResponse: parsed.totalColleges,
           });
@@ -118,6 +126,7 @@ export class QueryExecutorService {
             collegeId,
             promptId: prompt.id,
             promptText: resolvedPrompt,
+            promptCategory: prompt.category,
             aiEngine: 'chatgpt',
             executedAt: new Date(),
             executionStatus: 'failed',
@@ -176,7 +185,7 @@ export class QueryExecutorService {
     // Replace {program} - use first program if multiple
     if (college.programs && college.programs.length > 0) {
       resolved = resolved.replace(/{program}/gi, college.programs[0]);
-    } 
+    }
 
     return resolved;
   }

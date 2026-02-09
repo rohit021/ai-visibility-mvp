@@ -3,19 +3,19 @@ import { PromptLibrary } from '../entities/prompt-library.entity';
 
 export const prompts = [
   // GENERAL (10 prompts)
-  { text: 'Best colleges in {city}', category: 'general' },
-  { text: 'Top universities in {state}', category: 'general' },
-  { text: 'Most reputed colleges in {city}', category: 'general' },
-  { text: 'Which college should I choose in {city}?', category: 'general' },
-  { text: 'Good colleges for higher education in {city}', category: 'general' },
-  { text: 'Universities worth joining in {state}', category: 'general' },
-  { text: 'Best private colleges in {city}', category: 'general' },
-  { text: 'Top 10 colleges in {city}', category: 'general' },
-  { text: 'Colleges with good reputation in {city}', category: 'general' },
-  { text: 'Where should I study in {city}?', category: 'general' },
+  // { text: 'Best colleges in {city}', category: 'general' },
+  // { text: 'Top universities in {state}', category: 'general' },
+  // { text: 'Most reputed colleges in {city}', category: 'general' },
+  // { text: 'Which college should I choose in {city}?', category: 'general' },
+  // { text: 'Good colleges for higher education in {city}', category: 'general' },
+  // { text: 'Universities worth joining in {state}', category: 'general' },
+  // { text: 'Best private colleges in {city}', category: 'general' },
+  // { text: 'Top 10 colleges in {city}', category: 'general' },
+  // { text: 'Colleges with good reputation in {city}', category: 'general' },
+  // { text: 'Where should I study in {city}?', category: 'general' },
 
   // // PROGRAM SPECIFIC (15 prompts)
-  // { text: 'Best BTech colleges in {city}', category: 'program_specific' },
+  { text: 'Best BTech colleges in {city}', category: 'program_specific' },
   // { text: 'Top engineering colleges in {city}', category: 'program_specific' },
   // { text: 'Best MBA colleges in {city}', category: 'program_specific' },
   // { text: 'Top BBA programs in {state}', category: 'program_specific' },
@@ -69,10 +69,10 @@ export async function seedPrompts(dataSource: DataSource) {
   // Check if prompts already exist
   const existingCount = await promptRepo.count();
 
-  if (existingCount > 0) {
-    console.log('Prompts already seeded. Skipping...');
-    return;
-  }
+  // if (existingCount > 0) {
+  //   console.log('Prompts already seeded. Skipping...');
+  //   return;
+  // }
 
   console.log('Seeding 50 default prompts...');
 

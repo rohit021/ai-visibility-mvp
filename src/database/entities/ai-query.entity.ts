@@ -22,6 +22,9 @@ export class AiQuery {
   @Column({ name: 'prompt_text', type: 'text' })
   promptText: string;
 
+  @Column({ name: 'prompt_category', nullable: true })
+  promptCategory: string;
+
   @Column({
     name: 'ai_engine',
     type: 'enum',
@@ -59,8 +62,34 @@ export class AiQuery {
   @Column({ name: 'your_college_context', type: 'text', nullable: true })
   yourCollegeContext: string;
 
+  // NEW: Explicit reasoning from structured prompt (Option 2)
+  @Column({ name: 'your_college_reasoning', type: 'text', nullable: true })
+  yourCollegeReasoning: string;
+
+  // NEW: Weaknesses identified for your college
+  @Column({ name: 'your_college_weaknesses', type: 'json', nullable: true })
+  yourCollegeWeaknesses: string[];
+
+  // NEW: Strengths identified for your college
+  @Column({ name: 'your_college_strengths', type: 'json', nullable: true })
+  yourCollegeStrengths: string[];
+
   @Column({ name: 'competitors_mentioned', type: 'json', nullable: true })
-  competitorsMentioned: any[];
+  competitorsMentioned: {
+    name: string;
+    rank: number;
+    context: string;
+    reasoning?: string;
+    strengths?: string[];
+  }[];
+
+  // NEW: Sources/citations mentioned in response
+  @Column({ name: 'sources_cited', type: 'json', nullable: true })
+  sourcesCited: string[];
+
+  // NEW: Key ranking factors mentioned by AI
+  @Column({ name: 'ranking_factors', type: 'json', nullable: true })
+  rankingFactors: string[];
 
   @Column({ name: 'response_length', nullable: true })
   responseLength: number;

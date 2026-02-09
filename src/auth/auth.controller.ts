@@ -16,6 +16,7 @@ export class AuthController {
 
   @Post('login')
   async login(@Body() loginDto: LoginDto) {
+    console.log("Login attempt for email:", loginDto.email);
     return this.authService.login(loginDto);
   }
 
