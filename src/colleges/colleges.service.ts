@@ -123,4 +123,13 @@ export class CollegesService {
     competitor.isActive = false;
     return this.competitorRepository.save(competitor);
   }
+
+
+  async getCollegesByCity(cityId: number) {
+    return this.collegeRepository.find({
+      where: { cityId, isActive: true },
+      relations: ['city'],
+      order: { nirfRank: 'ASC' },
+    });
+  }
 }

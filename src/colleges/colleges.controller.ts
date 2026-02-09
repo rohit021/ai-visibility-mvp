@@ -75,4 +75,17 @@ export class CollegesController {
   ) {
     return this.collegesService.removeCompetitor(id, competitorId, user.userId);
   }
+
+
+
+  // ##############################City###################
+
+  @Get('by-city/:cityId')
+  async getCollegesByCity(@Param('cityId', ParseIntPipe) cityId: number) {
+    return this.collegesService.getCollegesByCity(cityId);
+  }
+
+
 }
+
+

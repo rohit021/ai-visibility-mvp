@@ -13,13 +13,13 @@ export class CreateCollegeDto {
   @IsNotEmpty()
   collegeName: string;
 
-  @IsString()
-  @IsNotEmpty()
-  city: string;
+  @IsNumber()
+  @IsOptional()
+  cityId?: number;
 
   @IsString()
-  @IsNotEmpty()
-  state: string;
+  @IsOptional()
+  state?: string;
 
   @IsUrl()
   @IsOptional()
@@ -33,15 +33,7 @@ export class CreateCollegeDto {
   @IsOptional()
   establishedYear?: number;
 
-  @IsEnum(['private', 'government', 'deemed'])
+  @IsEnum(['private', 'government', 'deemed', 'autonomous'])
   @IsOptional()
   collegeType?: string;
-
-  @IsArray()
-  @IsOptional()
-  programs?: string[];
-
-  @IsArray()
-  @IsOptional()
-  specializations?: string[];
 }

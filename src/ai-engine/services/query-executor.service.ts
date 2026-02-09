@@ -183,9 +183,9 @@ export class QueryExecutorService {
     resolved = resolved.replace(/{college_name}/gi, college.collegeName);
 
     // Replace {program} - use first program if multiple
-    if (college.programs && college.programs.length > 0) {
-      resolved = resolved.replace(/{program}/gi, college.programs[0]);
-    }
+    // if (college.programs && college.programs.length > 0) {
+    //   resolved = resolved.replace(/{program}/gi, college.programs[0]);
+    // }
 
     return resolved;
   }
