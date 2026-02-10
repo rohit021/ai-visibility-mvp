@@ -10,10 +10,10 @@ import {
   Index,
 } from 'typeorm';
 import { City } from './city.entity';
-// import { CollegeSubscription } from './college-subscription.entity';
+import { CollegeSubscription } from './college-subscription.entity';
 import { AiQuery } from './ai-query.entity';
-import { User } from './user.entity';
-import { Competitor } from './competitor.entity';
+import { CollegePrompt } from './college-prompt.entity';
+import { CollegeCompetitor } from './college-competitor.entity';
 
 @Entity('colleges')
 export class College {
@@ -26,7 +26,7 @@ export class College {
   @Column({ name: 'city_id', nullable: true })
   cityId?: number;
 
-   @Column({ length: 100, nullable: true })
+  @Column({ length: 100, nullable: true })
   city?: string;
 
   @Column({ length: 100, nullable: true })
@@ -58,51 +58,33 @@ export class College {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
+  // Relations
+  @ManyToOne(() => City, (city) => city.colleges, { nullable: true })
+  @JoinColumn({ name: 'city_id' })
+  cityRelation: City;
 
-  // Add these columns back
-  @Column({ name: 'user_id' })
-  userId: number;
+  @OneToMany(() => CollegeSubscription, (subscription) => subscription.college)
+  subscriptions: CollegeSubscription[];
 
-  @Column({
-    name: 'subscription_plan',
-    type: 'enum',
-    enum: ['starter', 'professional', 'enterprise'],
-    default: 'starter',
-  })
-  subscriptionPlan: string;
+  @OneToMany(() => CollegeCompetitor, (competitor) => competitor.college)
+  competitors: CollegeCompetitor[];
 
-  @Column({
-    name: 'subscription_status',
-    type: 'enum',
-    enum: ['trial', 'active', 'expired', 'cancelled'],
-    default: 'trial',
-  })
-  subscriptionStatus: string;
-
-  @Column({ name: 'trial_ends_at', type: 'timestamp', nullable: true })
-  trialEndsAt?: Date;
-
-  @Column({ name: 'subscription_ends_at', type: 'timestamp', nullable: true })
-  subscriptionEndsAt?: Date;
-
-  // Add this relation back
-  @ManyToOne(() => User, (user) => user.colleges)
-  @JoinColumn({ name: 'user_id' })
-  user: User;
-
-@OneToMany(() => Competitor, (competitor) => competitor.college)
-competitors: Competitor[];
+  @OneToMany(() => CollegeCompetitor, (competitor) => competitor.competitorCollege)
+  competitorOf: CollegeCompetitor[];
 
   @OneToMany(() => AiQuery, (query) => query.college)
   aiQueries: AiQuery[];
 
+  @OneToMany(() => CollegePrompt, (collegePrompt) => collegePrompt.college)
+  prompts: CollegePrompt[];
+
   // Indexes
-  @Index('idx_city')
-  cityIndex: number;
+  // @Index('idx_city')
+  // cityIndex: number;
 
-  @Index('idx_nirf')
-  nirfIndex: number;
+  // @Index('idx_nirf')
+  // nirfIndex: number;
 
-  @Index('idx_type')
-  typeIndex: string;
+  // @Index('idx_type')
+  // typeIndex: string;
 }

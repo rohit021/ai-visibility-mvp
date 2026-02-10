@@ -20,8 +20,6 @@ export class AiQuery {
   @PrimaryGeneratedColumn()
   id: number;
 
-
-
   @Index()
   @Column({ name: 'college_id' })
   collegeId: number;

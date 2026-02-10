@@ -31,9 +31,9 @@ export class City {
   @OneToMany(() => College, (college) => college.city)
   colleges: College[];
 
-  @Index('idx_state')
-  stateIndex: string;
+  // @Index('idx_state')
+  // stateIndex: string;
 
-  @Index('idx_region')
-  regionIndex: string;
+  // @Index('idx_region')
+  // regionIndex: string;
 }
