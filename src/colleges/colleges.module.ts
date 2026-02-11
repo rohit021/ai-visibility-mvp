@@ -6,6 +6,7 @@ import { College } from '../database/entities/college.entity';
 import { CollegeSubscription } from '../database/entities/college-subscription.entity';
 import { CollegeCompetitor } from '../database/entities/college-competitor.entity';
 import { City } from '../database/entities/city.entity';
+import { CollegePrompt } from '../database/entities/college-prompt.entity';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { City } from '../database/entities/city.entity';
       CollegeSubscription,
       CollegeCompetitor,
       City,
+      CollegePrompt,
     ]),
   ],
   providers: [CollegesService],

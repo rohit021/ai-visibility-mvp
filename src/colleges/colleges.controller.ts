@@ -121,4 +121,36 @@ export class CollegesController {
       user.userId,
     );
   }
+
+
+  @Post(':collegeId/prompts/:promptId')
+@UseGuards(JwtAuthGuard)
+async assignPrompt(
+  @Param('collegeId', ParseIntPipe) collegeId: number,
+  @Param('promptId', ParseIntPipe) promptId: number,
+  @CurrentUser() user: any,
+  @Body('priority') priority: number = 0,
+) {
+  return this.collegesService.assignPrompt(collegeId, promptId, user.userId, priority);
 }
+
+@Get(':collegeId/prompts')
+@UseGuards(JwtAuthGuard)
+async getCollegePrompts(
+  @Param('collegeId', ParseIntPipe) collegeId: number,
+  @CurrentUser() user: any,
+) {
+  return this.collegesService.getCollegePrompts(collegeId, user.userId);
+}
+
+@Delete(':collegeId/prompts/:promptId')
+@UseGuards(JwtAuthGuard)
+async removePrompt(
+  @Param('collegeId', ParseIntPipe) collegeId: number,
+  @Param('promptId', ParseIntPipe) promptId: number,
+  @CurrentUser() user: any,
+) {
+  return this.collegesService.removePrompt(collegeId, promptId, user.userId);
+}
+}
+

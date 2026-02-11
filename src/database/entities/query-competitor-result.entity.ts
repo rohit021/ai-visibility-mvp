@@ -24,7 +24,7 @@ export class QueryCompetitorResult {
 
   @Index()
   @Column({ name: 'college_id' })
-  collegeId: number;
+  collegeId: number; // compitetor college id
 
   @Index()
   @Column({ name: 'rank_position', type: 'tinyint', nullable: true })
@@ -54,6 +54,10 @@ export class QueryCompetitorResult {
   @JoinColumn({ name: 'query_id' })
   query: AiQuery;
 
+
+    @ManyToOne(() => College)
+  @JoinColumn({ name: 'college_id' })
+  college: College;
   // @ManyToOne(() => College, (college) => college.competitorResults)
   // @JoinColumn({ name: 'college_id' })
   // college: College;

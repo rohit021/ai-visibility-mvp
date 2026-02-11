@@ -1,15 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-interface CollegeInsight {
+export interface CollegeInsight {
   name: string;
   rank: number;
+  section: string;
   context: string;
   reasoning: string;
   strengths: string[];
   weaknesses: string[];
+  sourceCited: string;
 }
 
-interface ParsedResponse {
+export interface ParsedResponse {
   collegesFound: CollegeInsight[];
   totalColleges: number;
   sourcesCited: string[];
@@ -20,300 +22,266 @@ interface ParsedResponse {
 export class ResponseParserService {
   private readonly logger = new Logger(ResponseParserService.name);
 
-  // Known sources that AI might cite
-  private readonly knownSources = [
-    'nirf', 'shiksha', 'collegedunia', 'careers360', 'wikipedia',
-    'times of india', 'hindustan times', 'official website', 
-    'placement report', 'annual report', 'naac', 'aicte', 'ugc',
-    'quora', 'linkedin', 'glassdoor', 'ambitionbox', 'naukri'
-  ];
+  parseResponse(
+    response: string,
+    clientCollegeName: string,
+    competitorNames: string[],
+  ): ParsedResponse {
+    console.log('\n' + '='.repeat(80));
+    console.log('🔍 PARSING AI RESPONSE');
+    console.log('='.repeat(80));
+    console.log('🎓 YOUR COLLEGE:', clientCollegeName);
+    console.log('🎯 COMPETITORS:', competitorNames.join(', '));
+    console.log('='.repeat(80) + '\n');
 
-  // Common ranking factors
-  private readonly rankingFactorKeywords = [
-    'placement', 'package', 'salary', 'lpa', 'recruitment', 'recruiters',
-    'nirf rank', 'ranking', 'infrastructure', 'campus', 'faculty',
-    'research', 'industry', 'connections', 'tie-ups', 'collaborations',
-    'accreditation', 'naac', 'nba', 'fees', 'affordable', 'hostel',
-    'location', 'alumni', 'internship', 'curriculum', 'program'
-  ];
-
-  // Weakness indicator phrases
-  private readonly weaknessIndicators = [
-    'however', 'but', 'although', 'lacks', 'missing', 'not available',
-    'limited', 'no data', 'unclear', 'outdated', 'weak', 'poor',
-    'could improve', 'needs improvement', 'not published', 'unavailable',
-    'lower than', 'behind', 'less than', 'fewer', 'not as good'
-  ];
-
-  // Strength indicator phrases
-  private readonly strengthIndicators = [
-    'excellent', 'outstanding', 'top', 'best', 'leading', 'renowned',
-    'strong', 'high', 'impressive', 'notable', 'exceptional', 'superior',
-    'well-known', 'reputed', 'established', 'recognized', 'acclaimed',
-    'consistently', 'robust', 'comprehensive', 'extensive'
-  ];
-
-  parseResponse(response: string, knownColleges: string[]): ParsedResponse {
-    this.logger.log('Parsing AI response for college mentions and insights...');
-
+    const allKnownColleges = [clientCollegeName, ...competitorNames];
     const collegesFound: CollegeInsight[] = [];
+
+    // Split response into lines
     const lines = response.split('\n');
-
-    // Pattern for numbered lists with structured format
-    const numberedPattern = /^\s*(\d+)\.\s*\[?([^\]\n]+)\]?/;
     
-    let currentCollege: Partial<CollegeInsight> | null = null;
-    let currentRank = 0;
-    let currentSection = '';
-
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const trimmedLine = line.trim();
-
-      if (!trimmedLine) continue;
-
-      // Check for new college entry
-      const numberedMatch = trimmedLine.match(numberedPattern);
-      if (numberedMatch) {
-        // Save previous college if exists
-        if (currentCollege && currentCollege.name) {
-          collegesFound.push(this.finalizeCollegeInsight(currentCollege, knownColleges));
-        }
-
-        currentRank = parseInt(numberedMatch[1]);
-        const collegeName = this.extractCollegeName(numberedMatch[2], knownColleges);
-
-        currentCollege = {
-          name: collegeName || numberedMatch[2].replace(/[*_`\[\]]/g, '').trim(),
-          rank: currentRank,
-          context: '',
-          reasoning: '',
-          strengths: [],
-          weaknesses: [],
-        };
-        currentSection = 'context';
-        continue;
-      }
-
-      // If we have a current college, parse its details
-      if (currentCollege) {
-        const lowerLine = trimmedLine.toLowerCase();
-
-        // Detect section headers
-        if (lowerLine.includes('rank reason') || lowerLine.includes('why:')) {
-          currentSection = 'reasoning';
-          const reasonText = trimmedLine.split(':').slice(1).join(':').trim();
-          if (reasonText) currentCollege.reasoning = reasonText;
-          continue;
-        }
-        if (lowerLine.includes('strength')) {
-          currentSection = 'strengths';
-          continue;
-        }
-        if (lowerLine.includes('weakness') || lowerLine.includes('limitation')) {
-          currentSection = 'weaknesses';
-          continue;
-        }
-        if (lowerLine.includes('key stats') || lowerLine.includes('statistics')) {
-          currentSection = 'stats';
-          continue;
-        }
-
-        // Add content to appropriate section
-        const cleanedLine = trimmedLine.replace(/^[-•*]\s*/, '').trim();
-        if (cleanedLine) {
-          switch (currentSection) {
-            case 'reasoning':
-              currentCollege.reasoning += ' ' + cleanedLine;
-              break;
-            case 'strengths':
-              currentCollege.strengths.push(cleanedLine);
-              break;
-            case 'weaknesses':
-              currentCollege.weaknesses.push(cleanedLine);
-              break;
-            default:
-              currentCollege.context += ' ' + cleanedLine;
-              // Also extract inline strengths/weaknesses
-              this.extractInlineInsights(cleanedLine, currentCollege);
+      const line = lines[i].trim();
+      
+      // Check if line starts with "1." or "2." etc.
+      const numberMatch = line.match(/^(\d+)\.\s+\*?\*?(.+?)(?:\*\*)?:/);
+      
+      if (numberMatch) {
+        const rank = parseInt(numberMatch[1]);
+        const collegeName = numberMatch[2]
+          .replace(/\*\*/g, '')  // Remove bold markers
+          .replace(/\*/g, '')    // Remove italic markers
+          .trim();
+        
+        console.log(`\n📍 Found #${rank}: "${collegeName}"`);
+        
+        // Collect full context for this college
+        let context = line;
+        let j = i + 1;
+        
+        // Keep adding lines until we hit the next numbered item or end
+        while (j < lines.length) {
+          const nextLine = lines[j].trim();
+          if (nextLine.match(/^\d+\.\s+/)) {
+            break; // Found next college
           }
+          context += '\n' + nextLine;
+          j++;
+          
+          // Safety: don't go more than 15 lines
+          if (j - i > 15) break;
+        }
+        
+        console.log(`📄 Context: ${context.substring(0, 100)}...`);
+        
+        // Try to match to known colleges
+        const matchedCollege = this.findBestMatch(collegeName, allKnownColleges);
+        
+        if (matchedCollege) {
+          console.log(`✅ MATCHED: "${collegeName}" → "${matchedCollege}"`);
+          
+          // Extract data
+          const reasoning = this.extractReasoning(context);
+          const strengths = this.extractStrengths(context);
+          const weaknesses = this.extractWeaknesses(context);
+          const source = this.findSource(context);
+          const section = this.findSection(response, i);
+          
+          collegesFound.push({
+            name: matchedCollege,
+            rank,
+            section,
+            context: context.substring(0, 1000),
+            reasoning: reasoning.substring(0, 500),
+            strengths: strengths.slice(0, 5),
+            weaknesses: weaknesses.slice(0, 3),
+            sourceCited: source,
+          });
+        } else {
+          console.log(`❌ NOT MATCHED: "${collegeName}" (not in tracked colleges)`);
         }
       }
     }
 
-    // Don't forget the last college
-    if (currentCollege && currentCollege.name) {
-      collegesFound.push(this.finalizeCollegeInsight(currentCollege, knownColleges));
-    }
-
-    // If structured parsing failed, fallback to basic extraction
-    if (collegesFound.length === 0) {
-      collegesFound.push(...this.fallbackExtraction(response, knownColleges));
-    }
-
-    // Extract sources and ranking factors from full response
-    const sourcesCited = this.extractSources(response);
-    const rankingFactors = this.extractRankingFactors(response);
-
-    this.logger.log(`Found ${collegesFound.length} colleges with insights`);
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`✅ TOTAL COLLEGES PARSED: ${collegesFound.length}`);
+    console.log(`='.repeat(80)}\n`);
 
     return {
       collegesFound,
       totalColleges: collegesFound.length,
-      sourcesCited,
-      rankingFactors,
+      sourcesCited: this.extractAllSources(response),
+      rankingFactors: this.extractFactors(response),
     };
   }
 
-  private extractInlineInsights(text: string, college: Partial<CollegeInsight>): void {
-    const lowerText = text.toLowerCase();
-
-    // Check for weakness indicators
-    for (const indicator of this.weaknessIndicators) {
-      if (lowerText.includes(indicator)) {
-        // Extract the phrase containing the weakness
-        const sentences = text.split(/[.!?]/);
-        for (const sentence of sentences) {
-          if (sentence.toLowerCase().includes(indicator)) {
-            const weakness = sentence.trim();
-            if (weakness && !college.weaknesses.includes(weakness)) {
-              college.weaknesses.push(weakness);
-            }
-          }
+  /**
+   * Find best matching college name
+   */
+  private findBestMatch(aiName: string, knownColleges: string[]): string | null {
+    const cleanAiName = this.cleanName(aiName);
+    
+    for (const knownCollege of knownColleges) {
+      const cleanKnown = this.cleanName(knownCollege);
+      
+      // Exact match
+      if (cleanAiName === cleanKnown) {
+        return knownCollege;
+      }
+      
+      // AI name contains DB name (e.g., "Amity University" contains "Amity")
+      if (cleanAiName.includes(cleanKnown)) {
+        return knownCollege;
+      }
+      
+      // DB name contains AI name (e.g., "Amity University Gurugram" contains "Amity University")
+      if (cleanKnown.includes(cleanAiName)) {
+        return knownCollege;
+      }
+      
+      // Word overlap matching
+      const aiWords = cleanAiName.split(/\s+/).filter(w => w.length > 2);
+      const knownWords = cleanKnown.split(/\s+/).filter(w => w.length > 2);
+      
+      if (aiWords.length > 0 && knownWords.length > 0) {
+        const matchedWords = aiWords.filter(aiWord =>
+          knownWords.some(knownWord => 
+            aiWord === knownWord || 
+            aiWord.includes(knownWord) || 
+            knownWord.includes(aiWord)
+          )
+        );
+        
+        const matchRatio = matchedWords.length / Math.max(aiWords.length, knownWords.length);
+        
+        // At least 60% word match
+        if (matchRatio >= 0.6) {
+          return knownCollege;
         }
       }
     }
-
-    // Check for strength indicators
-    for (const indicator of this.strengthIndicators) {
-      if (lowerText.includes(indicator)) {
-        const sentences = text.split(/[.!?]/);
-        for (const sentence of sentences) {
-          if (sentence.toLowerCase().includes(indicator) && 
-              !this.weaknessIndicators.some(w => sentence.toLowerCase().includes(w))) {
-            const strength = sentence.trim();
-            if (strength && !college.strengths.includes(strength)) {
-              college.strengths.push(strength);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  private finalizeCollegeInsight(college: Partial<CollegeInsight>, knownColleges: string[]): CollegeInsight {
-    // Try to match to known college name
-    const matchedName = this.extractCollegeName(college.name, knownColleges) || college.name;
-
-    return {
-      name: matchedName,
-      rank: college.rank || 0,
-      context: (college.context || '').trim().substring(0, 500),
-      reasoning: (college.reasoning || '').trim().substring(0, 500),
-      strengths: college.strengths || [],
-      weaknesses: college.weaknesses || [],
-    };
-  }
-
-  private extractCollegeName(text: string, knownColleges: string[]): string | null {
-    const cleanText = text
-      .replace(/[*_`\[\]]/g, '')
-      .replace(/\([^)]*\)/g, '')
-      .trim();
-
-    for (const college of knownColleges) {
-      if (cleanText.toLowerCase().includes(college.toLowerCase())) {
-        return college;
-      }
-
-      // Partial match
-      const collegeWords = college.toLowerCase().split(' ');
-      const textLower = cleanText.toLowerCase();
-
-      const matchCount = collegeWords.filter(
-        word => word.length > 3 && textLower.includes(word)
-      ).length;
-
-      if (matchCount >= 2 || (matchCount === 1 && collegeWords.length <= 2)) {
-        return college;
-      }
-    }
-
+    
     return null;
   }
 
-  private extractSources(response: string): string[] {
-    const sources: string[] = [];
-    const lowerResponse = response.toLowerCase();
+  private cleanName(name: string): string {
+    return name
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
 
-    for (const source of this.knownSources) {
-      if (lowerResponse.includes(source)) {
-        sources.push(source);
-      }
-    }
+  private extractReasoning(text: string): string {
+    const sentences = text
+      .split(/[.!?]+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 20);
+    
+    return sentences.length > 0 ? sentences[0] : text.substring(0, 200);
+  }
 
-    // Also look for "according to", "based on", "source:" patterns
-    const sourcePatterns = [
-      /according to ([^,.\n]+)/gi,
-      /based on ([^,.\n]+)/gi,
-      /source:\s*([^,.\n]+)/gi,
-      /as per ([^,.\n]+)/gi,
-      /data from ([^,.\n]+)/gi,
+  private extractStrengths(text: string): string[] {
+    const keywords = [
+      'offers', 'provides', 'has', 'features', 'known for', 'reputable',
+      'excellent', 'strong', 'good', 'top', 'best', 'private university',
+      'range of', 'various', 'well-established'
     ];
-
-    for (const pattern of sourcePatterns) {
-      const matches = response.matchAll(pattern);
-      for (const match of matches) {
-        const source = match[1].trim().toLowerCase();
-        if (source.length > 2 && source.length < 50 && !sources.includes(source)) {
-          sources.push(source);
-        }
+    
+    const sentences = text
+      .split(/[.!?]+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 15 && s.length <= 300);
+    
+    const strengths: string[] = [];
+    
+    for (const sentence of sentences) {
+      const lower = sentence.toLowerCase();
+      if (keywords.some(k => lower.includes(k))) {
+        strengths.push(sentence);
+        if (strengths.length >= 5) break;
       }
     }
-
-    return [...new Set(sources)];
+    
+    return strengths;
   }
 
-  private extractRankingFactors(response: string): string[] {
-    const factors: string[] = [];
-    const lowerResponse = response.toLowerCase();
-
-    for (const factor of this.rankingFactorKeywords) {
-      if (lowerResponse.includes(factor)) {
-        factors.push(factor);
+  private extractWeaknesses(text: string): string[] {
+    const keywords = [
+      'however', 'but', 'although', 'worth', 'recommend', 'should',
+      'important', 'note', 'consider', 'research', 'check'
+    ];
+    
+    const sentences = text
+      .split(/[.!?]+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 15 && s.length <= 300);
+    
+    const weaknesses: string[] = [];
+    
+    for (const sentence of sentences) {
+      const lower = sentence.toLowerCase();
+      if (keywords.some(k => lower.includes(k))) {
+        weaknesses.push(sentence);
+        if (weaknesses.length >= 3) break;
       }
     }
-
-    return [...new Set(factors)];
+    
+    return weaknesses;
   }
 
-  private fallbackExtraction(response: string, knownColleges: string[]): CollegeInsight[] {
-    const found: CollegeInsight[] = [];
-    const responseLower = response.toLowerCase();
-
-    knownColleges.forEach((college, index) => {
-      if (responseLower.includes(college.toLowerCase())) {
-        const position = responseLower.indexOf(college.toLowerCase());
-        const contextStart = Math.max(0, position - 50);
-        const contextEnd = Math.min(response.length, position + 300);
-        const context = response.substring(contextStart, contextEnd);
-
-        // Extract inline insights from context
-        const insight: Partial<CollegeInsight> = {
-          name: college,
-          rank: index + 1,
-          context: context.trim(),
-          reasoning: '',
-          strengths: [],
-          weaknesses: [],
-        };
-
-        this.extractInlineInsights(context, insight);
-
-        found.push(this.finalizeCollegeInsight(insight, knownColleges));
+  private findSource(text: string): string {
+    const sources = ['nirf', 'shiksha', 'collegedunia', 'careers360'];
+    const lower = text.toLowerCase();
+    
+    for (const source of sources) {
+      if (lower.includes(source)) {
+        return source;
       }
-    });
+    }
+    
+    return '';
+  }
 
+  private findSection(response: string, lineIndex: number): string {
+    const lines = response.split('\n');
+    
+    for (let i = lineIndex - 1; i >= Math.max(0, lineIndex - 10); i--) {
+      const line = lines[i].trim();
+      
+      if (line.match(/^#{1,3}\s+/) || line.match(/^\*\*[^*]+\*\*$/)) {
+        return line.replace(/^#{1,3}\s+/, '').replace(/\*\*/g, '');
+      }
+    }
+    
+    return 'General';
+  }
+
+  private extractAllSources(response: string): string[] {
+    const sources = ['nirf', 'shiksha', 'collegedunia', 'careers360'];
+    const found: string[] = [];
+    const lower = response.toLowerCase();
+    
+    for (const source of sources) {
+      if (lower.includes(source)) {
+        found.push(source);
+      }
+    }
+    
+    return found;
+  }
+
+  private extractFactors(response: string): string[] {
+    const factors = ['placement', 'package', 'infrastructure', 'faculty', 'fees'];
+    const found: string[] = [];
+    const lower = response.toLowerCase();
+    
+    for (const factor of factors) {
+      if (lower.includes(factor)) {
+        found.push(factor);
+      }
+    }
+    
     return found;
   }
 }

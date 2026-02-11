@@ -12,6 +12,7 @@ import { CollegeCompetitor } from '../database/entities/college-competitor.entit
 import { CreateCollegeDto } from './dto/create-college.dto';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { AddCompetitorDto } from './dto/add-competitor.dto';
+import { CollegePrompt } from '../database/entities/college-prompt.entity';
 
 @Injectable()
 export class CollegesService {
@@ -22,6 +23,8 @@ export class CollegesService {
     private subscriptionRepository: Repository<CollegeSubscription>,
     @InjectRepository(CollegeCompetitor)
     private competitorRepository: Repository<CollegeCompetitor>,
+    @InjectRepository(CollegePrompt)
+    private collegePromptRepo: Repository<CollegePrompt>,
   ) {}
 
   // ==================== COLLEGE MASTER DATA ====================
@@ -327,4 +330,82 @@ export class CollegesService {
     const limits = { starter: 2, professional: 3, enterprise: 5 };
     return limits[plan] || 2;
   }
+
+  async assignPrompt(
+  collegeId: number,
+  promptId: number,
+  userId: number,
+  priority: number = 0,
+) {
+  // Verify access
+  const subscription = await this.subscriptionRepository.findOne({
+    where: { userId, collegeId, isActive: true },
+  });
+
+  if (!subscription) {
+    throw new ForbiddenException('No access to this college');
+  }
+
+  // Check if already assigned
+  const existing = await this.collegePromptRepo.findOne({
+    where: { collegeId, promptId },
+  });
+
+  if (existing) {
+    existing.isEnabled = true;
+    existing.priority = priority;
+    return this.collegePromptRepo.save(existing);
+  }
+
+  const collegePrompt = this.collegePromptRepo.create({
+    collegeId,
+    promptId,
+    isEnabled: true,
+    priority,
+  });
+
+  return this.collegePromptRepo.save(collegePrompt);
+}
+
+async getCollegePrompts(collegeId: number, userId: number) {
+  // Verify access
+  const subscription = await this.subscriptionRepository.findOne({
+    where: { userId, collegeId, isActive: true },
+  });
+
+  if (!subscription) {
+    throw new ForbiddenException('No access to this college');
+  }
+
+  return this.collegePromptRepo.find({
+    where: { collegeId },
+    relations: ['prompt', 'prompt.category'],
+    order: { priority: 'DESC' },
+  });
+}
+
+async removePrompt(collegeId: number, promptId: number, userId: number) {
+  // Verify access
+  const subscription = await this.subscriptionRepository.findOne({
+    where: { userId, collegeId, isActive: true },
+  });
+
+  if (!subscription) {
+    throw new ForbiddenException('No access to this college');
+  }
+
+  const collegePrompt = await this.collegePromptRepo.findOne({
+    where: { collegeId, promptId },
+  });
+
+  if (!collegePrompt) {
+    throw new NotFoundException('Prompt assignment not found');
+  }
+
+  collegePrompt.isEnabled = false;
+  return this.collegePromptRepo.save(collegePrompt);
+}
+
+
+
 }
