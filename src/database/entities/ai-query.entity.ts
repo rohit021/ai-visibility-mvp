@@ -90,6 +90,9 @@ export class AiQuery {
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
+  
+  @Column({ name: 'signal_score', type: 'int', nullable: true })
+signalScore: number;
 
   
   @ManyToOne(() => College, (college) => college.aiQueries)

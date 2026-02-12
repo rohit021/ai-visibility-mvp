@@ -49,6 +49,9 @@ export class QueryCompetitorResult {
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
+  @Column({ name: 'signal_score', type: 'int', nullable: true })
+signalScore: number;
+
   // Relationships
   @ManyToOne(() => AiQuery, (query) => query.competitorResults)
   @JoinColumn({ name: 'query_id' })
