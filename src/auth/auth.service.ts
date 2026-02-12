@@ -2,6 +2,7 @@ import {
   Injectable,
   ConflictException,
   UnauthorizedException,
+  NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -22,7 +23,7 @@ export class AuthService {
   async register(registerDto: RegisterDto) {
     // Check if user already exists
     const existingUser = await this.userRepository.findOne({
-      where: { email: registerDto.email },
+      where: { email: registerDto.email.toLowerCase() },
     });
 
     if (existingUser) {
@@ -34,32 +35,33 @@ export class AuthService {
 
     // Create user
     const user = this.userRepository.create({
-      email: registerDto.email,
+      email: registerDto.email.toLowerCase(),
       passwordHash: hashedPassword,
       fullName: registerDto.fullName,
       role: 'college_user',
+      isActive: true,
     });
 
-    await this.userRepository.save(user);
+    const savedUser = await this.userRepository.save(user);
 
     // Generate JWT token
-    const token = this.generateToken(user);
+    const token = this.generateToken(savedUser);
 
     return {
       user: {
-        id: user.id,
-        email: user.email,
-        fullName: user.fullName,
-        role: user.role,
+        id: savedUser.id,
+        email: savedUser.email,
+        fullName: savedUser.fullName,
+        role: savedUser.role,
       },
       access_token: token,
     };
   }
 
   async login(loginDto: LoginDto) {
-    // Find user
+    // Find user (case-insensitive email)
     const user = await this.userRepository.findOne({
-      where: { email: loginDto.email },
+      where: { email: loginDto.email.toLowerCase() },
     });
 
     if (!user) {
@@ -72,9 +74,9 @@ export class AuthService {
       user.passwordHash,
     );
 
-    // if (!isPasswordValid) {
-    //   throw new UnauthorizedException('Invalid credentials');
-    // }
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
     // Check if user is active
     if (!user.isActive) {
@@ -97,11 +99,12 @@ export class AuthService {
 
   async getProfile(userId: number) {
     const user = await this.userRepository.findOne({
-      where: { id: userId },
+      where: { id: userId, isActive: true },
+      relations: ['subscriptions', 'subscriptions.college'],
     });
 
     if (!user) {
-      throw new UnauthorizedException('User not found');
+      throw new NotFoundException('User not found');
     }
 
     return {
@@ -110,6 +113,12 @@ export class AuthService {
       fullName: user.fullName,
       role: user.role,
       createdAt: user.createdAt,
+      subscriptions: user.subscriptions?.map((sub) => ({
+        id: sub.id,
+        collegeName: sub.college?.collegeName,
+        plan: sub.plan,
+        status: sub.status,
+      })) || [],
     };
   }
 
@@ -121,5 +130,18 @@ export class AuthService {
     };
 
     return this.jwtService.sign(payload);
+  }
+
+  // Helper method for JWT strategy
+  async validateUser(userId: number): Promise<User> {
+    const user = await this.userRepository.findOne({
+      where: { id: userId, isActive: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found or inactive');
+    }
+
+    return user;
   }
 }

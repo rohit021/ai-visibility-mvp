@@ -6,7 +6,7 @@ import {
   UpdateDateColumn,
   OneToMany,
 } from 'typeorm';
-import { College } from './college.entity';
+import { CollegeSubscription } from './college-subscription.entity';
 
 @Entity('users')
 export class User {
@@ -38,6 +38,6 @@ export class User {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
-  @OneToMany(() => College, (college) => college.user)
-  colleges: College[];
+  @OneToMany(() => CollegeSubscription, (subscription) => subscription.user)
+  subscriptions: CollegeSubscription[];
 }

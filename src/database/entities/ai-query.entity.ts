@@ -4,38 +4,43 @@ import {
   Column,
   CreateDateColumn,
   ManyToOne,
+  OneToMany,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { College } from './college.entity';
+import { Prompt } from './prompt.entity';
+import { AiEngine } from './ai-engine.entity';
+import { CitationSource } from './citation-source.entity';
+import { QueryCompetitorResult } from './query-competitor-result.entity';
+// import { RecommendationAffectedQuery } from './recommendation-affected-query.entity';
 
 @Entity('ai_queries')
 export class AiQuery {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Index()
   @Column({ name: 'college_id' })
   collegeId: number;
 
+  @Index()
   @Column({ name: 'prompt_id' })
   promptId: number;
 
-  @Column({ name: 'prompt_text', type: 'text' })
-  promptText: string;
+  @Index()
+  @Column({ name: 'ai_engine_id' })
+  aiEngineId: number;
 
-  @Column({ name: 'prompt_category', nullable: true })
-  promptCategory: string;
+  // Query details
+  @Column({ name: 'resolved_prompt_text', type: 'text' })
+  resolvedPromptText: string;
 
-  @Column({
-    name: 'ai_engine',
-    type: 'enum',
-    enum: ['chatgpt', 'claude', 'perplexity'],
-    default: 'chatgpt',
-  })
-  aiEngine: string;
-
+  @Index()
   @CreateDateColumn({ name: 'executed_at' })
   executedAt: Date;
 
+  @Index()
   @Column({
     name: 'execution_status',
     type: 'enum',
@@ -47,57 +52,68 @@ export class AiQuery {
   @Column({ name: 'error_message', type: 'text', nullable: true })
   errorMessage: string;
 
+  // Response details
   @Column({ name: 'raw_response', type: 'longtext', nullable: true })
   rawResponse: string;
-
-  @Column({ name: 'colleges_mentioned', type: 'json', nullable: true })
-  collegesMentioned: string[];
-
-  @Column({ name: 'your_college_mentioned', default: false })
-  yourCollegeMentioned: boolean;
-
-  @Column({ name: 'your_college_rank', nullable: true })
-  yourCollegeRank: number;
-
-  @Column({ name: 'your_college_context', type: 'text', nullable: true })
-  yourCollegeContext: string;
-
-  // NEW: Explicit reasoning from structured prompt (Option 2)
-  @Column({ name: 'your_college_reasoning', type: 'text', nullable: true })
-  yourCollegeReasoning: string;
-
-  // NEW: Weaknesses identified for your college
-  @Column({ name: 'your_college_weaknesses', type: 'json', nullable: true })
-  yourCollegeWeaknesses: string[];
-
-  // NEW: Strengths identified for your college
-  @Column({ name: 'your_college_strengths', type: 'json', nullable: true })
-  yourCollegeStrengths: string[];
-
-  @Column({ name: 'competitors_mentioned', type: 'json', nullable: true })
-  competitorsMentioned: {
-    name: string;
-    rank: number;
-    context: string;
-    reasoning?: string;
-    strengths?: string[];
-  }[];
-
-  // NEW: Sources/citations mentioned in response
-  @Column({ name: 'sources_cited', type: 'json', nullable: true })
-  sourcesCited: string[];
-
-  // NEW: Key ranking factors mentioned by AI
-  @Column({ name: 'ranking_factors', type: 'json', nullable: true })
-  rankingFactors: string[];
 
   @Column({ name: 'response_length', nullable: true })
   responseLength: number;
 
-  @Column({ name: 'total_colleges_in_response', nullable: true })
+  @Column({ name: 'total_colleges_in_response', type: 'tinyint', nullable: true })
   totalCollegesInResponse: number;
 
+  // YOUR COLLEGE RESULTS (merged - always 1:1 with query)
+  @Index()
+  @Column({ name: 'your_college_mentioned', default: false })
+  yourCollegeMentioned: boolean;
+
+  @Column({ name: 'your_college_rank', type: 'tinyint', nullable: true })
+  yourCollegeRank: number;
+
+  @Column({ name: 'your_college_section', length: 255, nullable: true })
+  yourCollegeSection: string;
+
+  @Column({ name: 'your_college_context', type: 'text', nullable: true })
+  yourCollegeContext: string;
+
+  @Column({ name: 'your_college_reasoning', type: 'text', nullable: true })
+  yourCollegeReasoning: string;
+
+  @Column({ name: 'your_college_source_id', nullable: true })
+  yourCollegeSourceId: number;
+
+  @Column({ name: 'your_college_strengths', type: 'json', nullable: true })
+  yourCollegeStrengths: string[];
+
+  @Column({ name: 'your_college_weaknesses', type: 'json', nullable: true })
+  yourCollegeWeaknesses: string[];
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
+  
+  @Column({ name: 'signal_score', type: 'int', nullable: true })
+signalScore: number;
+
+  
   @ManyToOne(() => College, (college) => college.aiQueries)
   @JoinColumn({ name: 'college_id' })
   college: College;
+
+  @ManyToOne(() => Prompt, (prompt) => prompt.aiQueries)
+  @JoinColumn({ name: 'prompt_id' })
+  prompt: Prompt;
+
+  @ManyToOne(() => AiEngine, (engine) => engine.queries)
+  @JoinColumn({ name: 'ai_engine_id' })
+  aiEngine: AiEngine;
+
+  @ManyToOne(() => CitationSource, (source) => source.aiQueries, { nullable: true })
+  @JoinColumn({ name: 'your_college_source_id' })
+  yourCollegeSource: CitationSource;
+
+  @OneToMany(() => QueryCompetitorResult, (result) => result.query)
+  competitorResults: QueryCompetitorResult[];
+
+  // @OneToMany(() => RecommendationAffectedQuery, (raq) => raq.query)
+  // affectedRecommendations: RecommendationAffectedQuery[];
 }

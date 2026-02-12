@@ -1,0 +1,500 @@
+{
+  "info": {
+    "name": "AI Visibility Platform - Complete API",
+    "_postman_id": "ai-visibility-platform-v1",
+    "description": "Complete API collection for AI Visibility Platform for Colleges",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"password123\",\n  \"fullName\": \"Test User\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "register"]
+            },
+            "description": "Register a new user account"
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.environment.set(\"jwt_token\", jsonData.access_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Login and get JWT token (auto-saves to environment variable)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/profile",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "profile"]
+            },
+            "description": "Get current user profile with subscriptions"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Colleges",
+      "item": [
+        {
+          "name": "Search Colleges",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/colleges/search?q=Amity&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["colleges", "search"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "Amity"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Search for colleges by name"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Colleges by City",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/colleges/by-city/2",
+              "host": ["{{base_url}}"],
+              "path": ["colleges", "by-city", "2"]
+            },
+            "description": "Get all colleges in a specific city (cityId = 2 is Gurugram)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get College Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/colleges/details/1",
+              "host": ["{{base_url}}"],
+              "path": ["colleges", "details", "1"]
+            },
+            "description": "Get details of a specific college"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Subscriptions",
+      "item": [
+        {
+          "name": "Create Subscription",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.environment.set(\"subscription_id\", jsonData.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"collegeId\": 1,\n  \"plan\": \"professional\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/colleges/subscriptions",
+              "host": ["{{base_url}}"],
+              "path": ["colleges", "subscriptions"]
+            },
+            "description": "Subscribe to manage a college (auto-saves subscription_id)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get User Subscriptions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/colleges/subscriptions",
+              "host": ["{{base_url}}"],
+              "path": ["colleges", "subscriptions"]
+            },
+            "description": "Get all subscriptions for current user"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Subscription Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/colleges/subscriptions/{{subscription_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["colleges", "subscriptions", "{{subscription_id}}"]
+            },
+            "description": "Get specific subscription details"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Subscription Plan",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan\": \"enterprise\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/colleges/subscriptions/{{subscription_id}}/plan",
+              "host": ["{{base_url}}"],
+              "path": ["colleges", "subscriptions", "{{subscription_id}}", "plan"]
+            },
+            "description": "Upgrade/downgrade subscription plan"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Competitors",
+      "item": [
+        {
+          "name": "Add Competitor",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"competitorCollegeId\": 2\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/colleges/1/competitors",
+              "host": ["{{base_url}}"],
+              "path": ["colleges", "1", "competitors"]
+            },
+            "description": "Add a competitor college to track (use college ID)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Competitors",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/colleges/1/competitors",
+              "host": ["{{base_url}}"],
+              "path": ["colleges", "1", "competitors"]
+            },
+            "description": "Get all competitors for a college"
+          },
+          "response": []
+        },
+        {
+          "name": "Remove Competitor",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/colleges/1/competitors/1",
+              "host": ["{{base_url}}"],
+              "path": ["colleges", "1", "competitors", "1"]
+            },
+            "description": "Remove a competitor (soft delete)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "AI Queries",
+      "item": [
+        {
+          "name": "Execute Queries",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai-queries/execute/1",
+              "host": ["{{base_url}}"],
+              "path": ["ai-queries", "execute", "1"]
+            },
+            "description": "Execute AI queries for a college (runs all active prompts)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Query History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai-queries/1/history?limit=50&status=success",
+              "host": ["{{base_url}}"],
+              "path": ["ai-queries", "1", "history"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "status",
+                  "value": "success",
+                  "description": "Options: success, failed, pending"
+                }
+              ]
+            },
+            "description": "Get query execution history for a college"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Query Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai-queries/1/query/1",
+              "host": ["{{base_url}}"],
+              "path": ["ai-queries", "1", "query", "1"]
+            },
+            "description": "Get specific query details with competitor results"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Query Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai-queries/1/stats",
+              "host": ["{{base_url}}"],
+              "path": ["ai-queries", "1", "stats"]
+            },
+            "description": "Get statistics for a college (mention rate, avg rank, etc.)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin - Master Data",
+      "item": [
+        {
+          "name": "Create College (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"collegeName\": \"New College Name\",\n  \"cityId\": 2,\n  \"state\": \"Haryana\",\n  \"website\": \"https://newcollege.edu\",\n  \"nirfRank\": 50,\n  \"establishedYear\": 2000,\n  \"collegeType\": \"private\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/colleges",
+              "host": ["{{base_url}}"],
+              "path": ["colleges"]
+            },
+            "description": "Create a new college in master database (Admin function)"
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [""]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [""]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "jwt_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "subscription_id",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

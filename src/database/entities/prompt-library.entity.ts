@@ -3,7 +3,9 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  OneToMany,
 } from 'typeorm';
+import { CollegePrompt } from './college-prompt.entity';
 
 @Entity('prompt_library')
 export class PromptLibrary {
@@ -40,6 +42,9 @@ export class PromptLibrary {
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
-  @CreateDateColumn({ name: 'created_at' })
+  @Column({ name: 'created_at' })
   createdAt: Date;
+
+  @OneToMany(() => CollegePrompt, (collegePrompt) => collegePrompt.prompt)
+  colleges: CollegePrompt[];
 }

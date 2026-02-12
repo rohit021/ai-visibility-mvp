@@ -7,72 +7,47 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  Index,
 } from 'typeorm';
-import { User } from './user.entity';
-import { Competitor } from './competitor.entity';
+import { City } from './city.entity';
+import { CollegeSubscription } from './college-subscription.entity';
 import { AiQuery } from './ai-query.entity';
+import { CollegePrompt } from './college-prompt.entity';
+import { CollegeCompetitor } from './college-competitor.entity';
 
 @Entity('colleges')
 export class College {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ name: 'user_id' })
-  userId: number;
-
-  @Column({ name: 'college_name' })
+  @Column({ name: 'college_name', length: 255 })
   collegeName: string;
 
-  @Column()
-  city: string;
+  @Column({ name: 'city_id', nullable: true })
+  cityId?: number;
 
-  @Column()
-  state: string;
+  @Column({ length: 100, nullable: true })
+  city?: string;
 
-  @Column({ nullable: true })
-  website: string;
+  @Column({ length: 100, nullable: true })
+  state?: string;
+
+  @Column({ length: 500, nullable: true })
+  website?: string;
 
   @Column({ name: 'nirf_rank', nullable: true })
-  nirfRank: number;
+  nirfRank?: number;
 
   @Column({ name: 'established_year', nullable: true })
-  establishedYear: number;
+  establishedYear?: number;
 
   @Column({
     name: 'college_type',
     type: 'enum',
-    enum: ['private', 'government', 'deemed'],
+    enum: ['private', 'government', 'deemed', 'autonomous'],
     default: 'private',
   })
   collegeType: string;
-
-  @Column({ type: 'json', nullable: true })
-  programs: string[];
-
-  @Column({ type: 'json', nullable: true })
-  specializations: string[];
-
-  @Column({
-    name: 'subscription_plan',
-    type: 'enum',
-    enum: ['starter', 'professional', 'enterprise'],
-    default: 'professional',
-  })
-  subscriptionPlan: string;
-
-  @Column({
-    name: 'subscription_status',
-    type: 'enum',
-    enum: ['trial', 'active', 'expired'],
-    default: 'trial',
-  })
-  subscriptionStatus: string;
-
-  @Column({ name: 'trial_ends_at', type: 'timestamp', nullable: true })
-  trialEndsAt: Date;
-
-  @Column({ name: 'subscription_ends_at', type: 'timestamp', nullable: true })
-  subscriptionEndsAt: Date;
 
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
@@ -83,13 +58,33 @@ export class College {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
-  @ManyToOne(() => User, (user) => user.colleges)
-  @JoinColumn({ name: 'user_id' })
-  user: User;
+  // Relations
+  @ManyToOne(() => City, (city) => city.colleges, { nullable: true })
+  @JoinColumn({ name: 'city_id' })
+  cityRelation: City;
 
-  @OneToMany(() => Competitor, (competitor) => competitor.college)
-  competitors: Competitor[];
+  @OneToMany(() => CollegeSubscription, (subscription) => subscription.college)
+  subscriptions: CollegeSubscription[];
+
+  @OneToMany(() => CollegeCompetitor, (competitor) => competitor.college)
+  competitors: CollegeCompetitor[];
+
+  @OneToMany(() => CollegeCompetitor, (competitor) => competitor.competitorCollege)
+  competitorOf: CollegeCompetitor[];
 
   @OneToMany(() => AiQuery, (query) => query.college)
   aiQueries: AiQuery[];
+
+  @OneToMany(() => CollegePrompt, (collegePrompt) => collegePrompt.college)
+  prompts: CollegePrompt[];
+
+  // Indexes
+  // @Index('idx_city')
+  // cityIndex: number;
+
+  // @Index('idx_nirf')
+  // nirfIndex: number;
+
+  // @Index('idx_type')
+  // typeIndex: string;
 }
