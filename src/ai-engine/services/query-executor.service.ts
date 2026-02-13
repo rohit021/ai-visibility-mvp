@@ -17,7 +17,21 @@ export interface ExecutionResult {
   totalQueries: number;
   successfulQueries: number;
   failedQueries: number;
+  totalCost: number;
   errors: string[];
+  summary: {
+    mentioned: number;
+    notMentioned: number;
+    avgRank: number | null;
+    bestRank: number | null;
+    worstRank: number | null;
+    avgSignalScore: number;
+    categoryBreakdown: Record<string, {
+      total: number;
+      mentioned: number;
+      avgRank: number | null;
+    }>;
+  };
 }
 
 @Injectable()
@@ -45,10 +59,27 @@ export class QueryExecutorService {
     private parserService: ResponseParserService,
   ) {}
 
-  async executeQueriesForCollege(collegeId: number): Promise<ExecutionResult> {
-    this.logger.log(`🚀 Starting query execution for college ${collegeId}`);
+  // ============================================================
+  // MAIN EXECUTION: LAYER 1 — VISIBILITY QUERIES
+  // ============================================================
 
-    // Get college
+  /**
+   * Execute all Layer 1 (visibility) queries for a college.
+   * This is the primary method called by the scheduler (Mon/Wed/Fri/Sun).
+   *
+   * @param collegeId - The client college ID
+   * @param queryLayer - Filter by query layer (default: 'visibility')
+   */
+  async executeQueriesForCollege(
+    collegeId: number,
+    queryLayer: 'visibility' | 'comparison' | 'detail' = 'visibility',
+  ): Promise<ExecutionResult> {
+    this.logger.log(`\n${'🚀'.repeat(3)} STARTING LAYER 1 EXECUTION`);
+    this.logger.log(`   College ID: ${collegeId}`);
+    this.logger.log(`   Query Layer: ${queryLayer}`);
+    this.logger.log('='.repeat(70));
+
+    // ── 1. Load college ──
     const college = await this.collegeRepo.findOne({
       where: { id: collegeId, isActive: true },
       relations: ['cityRelation'],
@@ -59,48 +90,236 @@ export class QueryExecutorService {
     }
 
     this.logger.log(`📚 College: ${college.collegeName}`);
+    this.logger.log(`📍 City: ${college.cityRelation?.cityName || college.city || 'Unknown'}`);
 
-    // ✅ CORRECT: Get college-specific prompts
-    const collegePrompts = await this.collegePromptRepo.find({
-      where: { 
-        collegeId, 
-        isEnabled: true 
-      },
+    // ── 2. Load prompts (filtered by query layer) ──
+    const prompts = await this.loadPrompts(collegeId, queryLayer);
+
+    if (prompts.length === 0) {
+      this.logger.warn('⚠️ No prompts found for this layer');
+      return this.emptyResult('No prompts available');
+    }
+
+    this.logger.log(`📝 ${prompts.length} prompts to execute (layer: ${queryLayer})`);
+
+    // ── 3. Load competitors ──
+    const { competitorNames, competitorMap } = await this.loadCompetitors(collegeId);
+    this.logger.log(`🎯 Tracking ${competitorNames.length} competitors`);
+
+    // ── 4. Get AI engine ──
+    const aiEngine = await this.getAiEngine();
+
+    // ── 5. Execute all prompts ──
+    let successCount = 0;
+    let failCount = 0;
+    let totalCost = 0;
+    const errors: string[] = [];
+
+    // Track results for summary
+    const rankResults: number[] = [];
+    const signalScores: number[] = [];
+    let mentionedCount = 0;
+    const categoryStats: Record<string, { total: number; mentioned: number; ranks: number[] }> = {};
+
+    for (let idx = 0; idx < prompts.length; idx++) {
+      const prompt = prompts[idx];
+      const categoryName = prompt.category?.displayName || prompt.category?.categoryName || 'General';
+
+      // Initialize category stats
+      if (!categoryStats[categoryName]) {
+        categoryStats[categoryName] = { total: 0, mentioned: 0, ranks: [] };
+      }
+      categoryStats[categoryName].total++;
+
+      try {
+        // Resolve placeholders
+        const resolvedPrompt = this.resolvePlaceholders(prompt.promptTemplate, college);
+
+        this.logger.log(`\n[${'─'.repeat(60)}]`);
+        this.logger.log(`📤 [${idx + 1}/${prompts.length}] ${categoryName}`);
+        this.logger.log(`   "${resolvedPrompt}"`);
+
+        // Execute query
+        const result = await this.openaiService.executeQuery(resolvedPrompt);
+
+        if (!result.success || !result.response) {
+          this.logger.error(`❌ Query failed: ${result.error}`);
+          await this.saveFailedQuery(collegeId, prompt.id, aiEngine.id, queryLayer, resolvedPrompt, result.error);
+          errors.push(`[${categoryName}] ${result.error}`);
+          failCount++;
+          await this.delay(2000);
+          continue;
+        }
+
+        totalCost += result.cost || 0;
+        this.logger.log(`✅ Response: ${result.response.length} chars`);
+
+        // Parse response
+        const parsed = this.parserService.parseResponse(
+          result.response,
+          college.collegeName,
+          competitorNames,
+        );
+
+        console.log("parsed values: ", parsed);
+
+        this.logger.log(`📊 Found ${parsed.collegesFound.length} matched colleges (${parsed.totalColleges} total)`);
+
+        // Find YOUR college in results
+        const yourCollege = parsed.collegesFound.find(
+          (c) => c.name.toLowerCase() === college.collegeName.toLowerCase(),
+        );
+
+        if (yourCollege) {
+          this.logger.log(
+            `🎓 YOUR COLLEGE: Rank #${yourCollege.rank} | Tier: ${yourCollege.sectionTier} | Signal: ${yourCollege.signalScore} | Richness: ${yourCollege.responseRichnessScore}`,
+          );
+          mentionedCount++;
+          rankResults.push(yourCollege.rank);
+          signalScores.push(yourCollege.signalScore);
+          categoryStats[categoryName].mentioned++;
+          categoryStats[categoryName].ranks.push(yourCollege.rank);
+        } else {
+          this.logger.log('❌ Your college NOT mentioned in response');
+        }
+
+        // Get or create citation sources
+        let sourceId: number | null = null;
+        if (yourCollege?.sourcesCited?.length > 0) {
+          const source = await this.getOrCreateSource(yourCollege.sourcesCited[0]);
+          sourceId = source?.id || null;
+        }
+
+        // ── Save AI Query record ──
+        const aiQuery = this.queryRepo.create({
+          collegeId,
+          promptId: prompt.id,
+          aiEngineId: aiEngine.id,
+          query_layer: queryLayer,
+          resolvedPromptText: resolvedPrompt,
+          executedAt: new Date(),
+          executionStatus: 'success',
+          rawResponse: result.response,
+          responseLength: result.response.length,
+          totalCollegesInResponse: parsed.totalColleges,
+
+          // Your college results
+          yourCollegeMentioned: !!yourCollege,
+          yourCollegeRank: yourCollege?.rank || null,
+          yourCollegeSection: yourCollege?.section || null,
+          yourCollegeSectionTier: yourCollege?.sectionTier || 'not_mentioned',
+          yourCollegeContext: yourCollege?.context || null,
+          yourCollegeReasoning: yourCollege?.reasoning || null,
+          yourCollegeSourceId: sourceId,
+          yourCollegeStrengths: yourCollege?.strengths || [],
+          yourCollegeWeaknesses: yourCollege?.weaknesses || [],
+          signalScore: yourCollege?.signalScore || 0,
+          responseRichnessScore: yourCollege?.responseRichnessScore || 0,
+          totalCost: result.cost || 0,
+        });
+
+        const savedQuery = await this.queryRepo.save(aiQuery);
+        this.logger.log(`💾 Saved query #${savedQuery.id}`);
+
+        // ── Save competitor results ──
+        const competitorsSaved = await this.saveCompetitorResults(
+          savedQuery.id,
+          parsed.collegesFound,
+          college.collegeName,
+          competitorMap,
+        );
+
+        this.logger.log(`✅ Saved ${competitorsSaved} competitor results`);
+        successCount++;
+      } catch (error) {
+        this.logger.error(`💥 Error on prompt ${prompt.id}: ${error.message}`);
+        errors.push(`[${categoryName}] ${error.message}`);
+        failCount++;
+      }
+
+      // Rate limiting: 2s between queries
+      if (idx < prompts.length - 1) {
+        await this.delay(2000);
+      }
+    }
+
+    // ── Build summary ──
+    const summary = this.buildSummary(
+      mentionedCount,
+      prompts.length - failCount,
+      rankResults,
+      signalScores,
+      categoryStats,
+    );
+
+    this.logger.log(`\n${'='.repeat(70)}`);
+    this.logger.log('🏁 EXECUTION COMPLETE');
+    this.logger.log(`   ✅ Success: ${successCount}`);
+    this.logger.log(`   ❌ Failed: ${failCount}`);
+    this.logger.log(`   💰 Total Cost: $${totalCost.toFixed(4)}`);
+    this.logger.log(`   📊 Mentioned: ${mentionedCount}/${successCount}`);
+    if (summary.avgRank) {
+      this.logger.log(`   📈 Avg Rank: #${summary.avgRank.toFixed(1)}`);
+    }
+    this.logger.log('='.repeat(70));
+
+    return {
+      success: failCount < prompts.length,
+      totalQueries: prompts.length,
+      successfulQueries: successCount,
+      failedQueries: failCount,
+      totalCost,
+      errors,
+      summary,
+    };
+  }
+
+  // ============================================================
+  // LOAD PROMPTS (Layer-filtered)
+  // ============================================================
+
+  private async loadPrompts(
+    collegeId: number,
+    queryLayer: string,
+  ): Promise<Prompt[]> {
+    // First try college-specific prompts
+    console.log("Loading prompts for college ", collegeId, " and query layer ", queryLayer);
+    let collegePrompts = await this.collegePromptRepo.find({
+      where: { collegeId, isEnabled: true },
       relations: ['prompt', 'prompt.category'],
       order: { priority: 'DESC', id: 'ASC' },
     });
 
+    console.log("Found college prompts: ", collegePrompts);
+
+    // Auto-assign if none exist
     if (collegePrompts.length === 0) {
-      this.logger.warn('⚠️ No prompts assigned to this college. Assigning default system prompts...');
-      
-      // Auto-assign system prompts if none exist
+      this.logger.warn('⚠️ No prompts assigned — auto-assigning system prompts');
       await this.autoAssignSystemPrompts(collegeId);
-      
-      // Fetch again
-      const retryPrompts = await this.collegePromptRepo.find({
-        where: { 
-          collegeId, 
-          isEnabled: true 
-        },
+
+      collegePrompts = await this.collegePromptRepo.find({
+        where: { collegeId, isEnabled: true },
         relations: ['prompt', 'prompt.category'],
         order: { priority: 'DESC', id: 'ASC' },
       });
-      
-      if (retryPrompts.length === 0) {
-        return {
-          success: false,
-          totalQueries: 0,
-          successfulQueries: 0,
-          failedQueries: 0,
-          errors: ['No prompts available for this college'],
-        };
-      }
     }
 
-    const prompts = collegePrompts.map(cp => cp.prompt);
-    this.logger.log(`📝 Found ${prompts.length} college-specific prompts to execute`);
+    // Filter by query layer
+    const filtered = collegePrompts
+      .map((cp) => cp.prompt)
+      .filter((p) => p && p.isActive && p.query_layer === queryLayer);
 
-    // Get competitors
+    return filtered;
+  }
+
+  // ============================================================
+  // LOAD COMPETITORS
+  // ============================================================
+
+  private async loadCompetitors(collegeId: number): Promise<{
+    competitorNames: string[];
+    competitorMap: Map<string, number>;
+  }> {
     const competitors = await this.competitorRepo.find({
       where: { collegeId, isActive: true },
       relations: ['competitorCollege', 'competitorCollege.cityRelation'],
@@ -108,196 +327,233 @@ export class QueryExecutorService {
 
     const competitorNames = competitors.map((c) => c.competitorCollege.collegeName);
     const competitorMap = new Map<string, number>();
-    
+
     competitors.forEach((comp) => {
-      const normalizedName = comp.competitorCollege.collegeName.toLowerCase().trim();
-      competitorMap.set(normalizedName, comp.competitorCollegeId);
+      // Store multiple keys for better matching
+      const name = comp.competitorCollege.collegeName;
+      const normalized = name.toLowerCase().trim();
+
+      competitorMap.set(normalized, comp.competitorCollegeId);
+
+      // Also store cleaned version (no special chars)
+      const cleaned = normalized.replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+      if (cleaned !== normalized) {
+        competitorMap.set(cleaned, comp.competitorCollegeId);
+      }
     });
 
-    this.logger.log(`🎯 Tracking ${competitors.length} competitors: ${competitorNames.join(', ')}`);
+    return { competitorNames, competitorMap };
+  }
 
-    // Get ChatGPT AI Engine
-    const aiEngine = await this.aiEngineRepo.findOne({
-      where: { engineName: 'chatgpt', isActive: true },
-    });
+  // ============================================================
+  // SAVE COMPETITOR RESULTS
+  // ============================================================
 
-    if (!aiEngine) {
-      throw new NotFoundException('ChatGPT AI Engine not configured');
-    }
+  private async saveCompetitorResults(
+    queryId: number,
+    collegesFound: Array<{
+      name: string;
+      rank: number;
+      section: string;
+      sectionTier: string;
+      context: string;
+      reasoning: string;
+      sourcesCited: string[];
+      strengths: string[];
+      weaknesses: string[];
+      signalScore: number;
+      responseRichnessScore: number;
+    }>,
+    clientCollegeName: string,
+    competitorMap: Map<string, number>,
+  ): Promise<number> {
 
-    let successCount = 0;
-    let failCount = 0;
-    const errors: string[] = [];
+    console.log("Saving competitor results for query ", queryId);
+    let saved = 0;
 
-    // Execute each prompt
-    for (const prompt of prompts) {
+    for (const collegeResult of collegesFound) {
+      // Skip client's own college
+      if (collegeResult.name.toLowerCase() === clientCollegeName.toLowerCase()) {
+        continue;
+      }
+
+      // Find competitor college ID using fuzzy matching
+      const competitorCollegeId = await this.findCompetitorId(
+        collegeResult.name,
+        competitorMap,
+      );
+
+      console.log(`Mapping "${collegeResult.name}" to competitor ID: ${competitorCollegeId}`);
+
+      if (!competitorCollegeId) {
+        this.logger.debug(`⬜ Skipping untracked college: "${collegeResult.name}"`);
+        continue;
+      }
+
+      // Get source ID
+      let sourceId: number | null = null;
+      if (collegeResult.sourcesCited?.length > 0) {
+        const source = await this.getOrCreateSource(collegeResult.sourcesCited[0]);
+        sourceId = source?.id || null;
+      }
+
       try {
-        const resolvedPrompt = this.resolvePlaceholders(prompt.promptTemplate, college);
+        const competitorResult = this.competitorResultRepo.create({
+          query: { id: queryId },
+          college: { id: competitorCollegeId },
+          // queryId,
+          // collegeId: competitorCollegeId,
+          rankPosition: collegeResult.rank,
+          section: collegeResult.section,
+          // sectionTier: collegeResult.sectionTier,
+          sectionTier: "best_overall",
+          context: collegeResult.context,
+          reasoning: collegeResult.reasoning,
+          sourceId,
+          strengths: collegeResult.strengths,
+          weaknesses: collegeResult.weaknesses,
+          signalScore: collegeResult.signalScore,
+          responseRichnessScore: collegeResult.responseRichnessScore,
+        });
 
-        this.logger.log(`\n${'='.repeat(60)}`);
-        this.logger.log(`📤 Executing: ${prompt.category?.categoryName} - "${resolvedPrompt}"`);
-
-        // Execute query
-        const result = await this.openaiService.executeQuery(resolvedPrompt);
-
-        if (result.success) {
-          this.logger.log(`✅ AI Response received (${result.response.length} chars)`);
-
-          // Parse response
-          const parsed = this.parserService.parseResponse(
-            result.response,
-            college.collegeName,
-            competitorNames,
-          );
-
-          this.logger.log(`📊 Parsed ${parsed.collegesFound.length} colleges from response`);
-
-          // Find YOUR college in results
-          const yourCollege = parsed.collegesFound.find(
-            (c) => c.name.toLowerCase() === college.collegeName.toLowerCase(),
-          );
-
-          if (yourCollege) {
-            this.logger.log(`🎓 Your College: Rank ${yourCollege.rank}, Section: ${yourCollege.section}`);
-          } else {
-            this.logger.log(`❌ Your college NOT mentioned in response`);
-          }
-
-          // Get or create citation source for your college
-          let sourceId: number | null = null;
-          if (yourCollege?.sourceCited) {
-            const source = await this.getOrCreateSource(yourCollege.sourceCited);
-            sourceId = source?.id || null;
-          }
-
-          // Create AI Query record
-          const aiQuery = this.queryRepo.create({
-            collegeId,
-            promptId: prompt.id,
-            aiEngineId: aiEngine.id,
-            resolvedPromptText: resolvedPrompt,
-            executedAt: new Date(),
-            executionStatus: 'success',
-            rawResponse: result.response,
-            responseLength: result.response.length,
-            totalCollegesInResponse: parsed.totalColleges,
-            yourCollegeMentioned: !!yourCollege,
-            yourCollegeRank: yourCollege?.rank || null,
-            yourCollegeSection: yourCollege?.section || null,
-            yourCollegeContext: yourCollege?.context || null,
-            yourCollegeReasoning: yourCollege?.reasoning || null,
-            yourCollegeSourceId: sourceId,
-            yourCollegeStrengths: yourCollege?.strengths || [],
-            yourCollegeWeaknesses: yourCollege?.weaknesses || [],
-          });
-
-          const savedQuery = await this.queryRepo.save(aiQuery);
-          this.logger.log(`💾 Saved query #${savedQuery.id}`);
-
-          // Save competitor results
-          let competitorsSaved = 0;
-          for (const collegeResult of parsed.collegesFound) {
-            // Skip if it's the client's college
-            if (collegeResult.name.toLowerCase() === college.collegeName.toLowerCase()) {
-              continue;
-            }
-
-            // Try to find matching competitor college ID
-            const normalizedName = collegeResult.name.toLowerCase().trim();
-            let competitorCollegeId = competitorMap.get(normalizedName);
-
-            // If not in tracked competitors, try to find in colleges table
-            if (!competitorCollegeId) {
-              const foundCollege = await this.collegeRepo
-                .createQueryBuilder('college')
-                .where('LOWER(college.collegeName) = :name', { name: normalizedName })
-                .andWhere('college.isActive = :active', { active: true })
-                .getOne();
-              
-              competitorCollegeId = foundCollege?.id || null;
-            }
-
-            // Skip if we can't identify the college
-            if (!competitorCollegeId) {
-              this.logger.warn(`⚠️ Could not identify college ID for: "${collegeResult.name}"`);
-              continue;
-            }
-
-            // Get or create source for this result
-            let resultSourceId: number | null = null;
-            if (collegeResult.sourceCited) {
-              const source = await this.getOrCreateSource(collegeResult.sourceCited);
-              resultSourceId = source?.id || null;
-            }
-
-            const competitorResult = this.competitorResultRepo.create({
-              queryId: savedQuery.id,
-              collegeId: competitorCollegeId,
-              rankPosition: collegeResult.rank,
-              section: collegeResult.section,
-              context: collegeResult.context,
-              reasoning: collegeResult.reasoning,
-              sourceId: resultSourceId,
-              strengths: collegeResult.strengths,
-            });
-
-            await this.competitorResultRepo.save(competitorResult);
-            competitorsSaved++;
-          }
-
-          this.logger.log(`✅ Saved ${competitorsSaved} competitor results`);
-          successCount++;
-        } else {
-          this.logger.error(`❌ Query failed: ${result.error}`);
-
-          // Save failed query
-          const aiQuery = this.queryRepo.create({
-            collegeId,
-            promptId: prompt.id,
-            aiEngineId: aiEngine.id,
-            resolvedPromptText: resolvedPrompt,
-            executedAt: new Date(),
-            executionStatus: 'failed',
-            errorMessage: result.error,
-          });
-
-          await this.queryRepo.save(aiQuery);
-          errors.push(`Prompt ${prompt.id}: ${result.error}`);
-          failCount++;
-        }
-
-        // Rate limiting delay
-        this.logger.log(`⏱️ Waiting 2 seconds before next query...`);
-        await this.delay(2000);
+        await this.competitorResultRepo.save(competitorResult);
+        saved++;
       } catch (error) {
-        this.logger.error(`💥 Error executing prompt ${prompt.id}: ${error.message}`);
-        errors.push(`Prompt ${prompt.id}: ${error.message}`);
-        failCount++;
+        // Handle duplicate key (same query + college combo)
+        if (error.code === 'ER_DUP_ENTRY' || error.message?.includes('Duplicate')) {
+          this.logger.debug(`⬜ Duplicate result for query ${queryId}, college ${competitorCollegeId}`);
+        } else {
+          this.logger.warn(`⚠️ Failed to save competitor result: ${error.message}`);
+        }
       }
     }
 
-    this.logger.log(`\n${'='.repeat(60)}`);
-    this.logger.log(`🏁 EXECUTION COMPLETE`);
-    this.logger.log(`   ✅ Success: ${successCount}`);
-    this.logger.log(`   ❌ Failed: ${failCount}`);
-    this.logger.log(`${'='.repeat(60)}\n`);
-
-    return {
-      success: failCount < prompts.length,
-      totalQueries: prompts.length,
-      successfulQueries: successCount,
-      failedQueries: failCount,
-      errors,
-    };
+    return saved;
   }
 
   /**
-   * Auto-assign system prompts to a college if none exist
+   * Find competitor college ID using fuzzy matching.
+   * Uses the parser's matching logic for consistency.
    */
-  private async autoAssignSystemPrompts(collegeId: number): Promise<void> {
-    this.logger.log(`🔧 Auto-assigning system prompts to college ${collegeId}...`);
+  private async findCompetitorId(
+    aiGivenName: string,
+    competitorMap: Map<string, number>,
+  ): Promise<number | null> {
+    const normalized = aiGivenName.toLowerCase().trim();
 
-    // Get all active system prompts
+    // Direct match in competitor map
+    const directMatch = competitorMap.get(normalized);
+    if (directMatch) return directMatch;
+
+    // Cleaned match
+    const cleaned = normalized.replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+    const cleanedMatch = competitorMap.get(cleaned);
+    if (cleanedMatch) return cleanedMatch;
+
+    // Fuzzy match: use parser's matching logic
+    const competitorNames = Array.from(competitorMap.keys());
+    const matchedKey = this.parserService.findBestMatch(aiGivenName, competitorNames);
+
+    if (matchedKey) {
+      return competitorMap.get(matchedKey.toLowerCase().trim()) || null;
+    }
+
+    // Last resort: database search
+    try {
+      const foundCollege = await this.collegeRepo
+        .createQueryBuilder('college')
+        .where('LOWER(college.collegeName) = :name', { name: normalized })
+        .andWhere('college.isActive = :active', { active: true })
+        .getOne();
+
+      return foundCollege?.id || null;
+    } catch {
+      return null;
+    }
+  }
+
+  // ============================================================
+  // SAVE FAILED QUERY
+  // ============================================================
+
+  private async saveFailedQuery(
+    collegeId: number,
+    promptId: number,
+    aiEngineId: number,
+    queryLayer: string,
+    resolvedPrompt: string,
+    errorMessage: string,
+  ): Promise<void> {
+    try {
+      const aiQuery = this.queryRepo.create({
+        collegeId,
+        promptId,
+        aiEngineId,
+        query_layer: "visibility", // need to fix this
+        resolvedPromptText: resolvedPrompt,
+        executedAt: new Date(),
+        executionStatus: 'failed',
+        errorMessage,
+      });
+
+      await this.queryRepo.save(aiQuery);
+    } catch (error) {
+      this.logger.error(`Failed to save error record: ${error.message}`);
+    }
+  }
+
+  // ============================================================
+  // BUILD EXECUTION SUMMARY
+  // ============================================================
+
+  private buildSummary(
+    mentionedCount: number,
+    totalSuccessful: number,
+    rankResults: number[],
+    signalScores: number[],
+    categoryStats: Record<string, { total: number; mentioned: number; ranks: number[] }>,
+  ): ExecutionResult['summary'] {
+    const avgRank =
+      rankResults.length > 0
+        ? rankResults.reduce((a, b) => a + b, 0) / rankResults.length
+        : null;
+
+    const avgSignalScore =
+      signalScores.length > 0
+        ? signalScores.reduce((a, b) => a + b, 0) / signalScores.length
+        : 0;
+
+    const categoryBreakdown: Record<string, { total: number; mentioned: number; avgRank: number | null }> = {};
+
+    for (const [category, stats] of Object.entries(categoryStats)) {
+      categoryBreakdown[category] = {
+        total: stats.total,
+        mentioned: stats.mentioned,
+        avgRank:
+          stats.ranks.length > 0
+            ? stats.ranks.reduce((a, b) => a + b, 0) / stats.ranks.length
+            : null,
+      };
+    }
+
+    return {
+      mentioned: mentionedCount,
+      notMentioned: totalSuccessful - mentionedCount,
+      avgRank,
+      bestRank: rankResults.length > 0 ? Math.min(...rankResults) : null,
+      worstRank: rankResults.length > 0 ? Math.max(...rankResults) : null,
+      avgSignalScore,
+      categoryBreakdown,
+    };
+  }
+
+  // ============================================================
+  // AUTO-ASSIGN SYSTEM PROMPTS
+  // ============================================================
+
+  private async autoAssignSystemPrompts(collegeId: number): Promise<void> {
+    this.logger.log(`🔧 Auto-assigning system prompts to college ${collegeId}`);
+
     const systemPrompts = await this.promptRepo.find({
       where: { isActive: true, isSystemPrompt: true },
       order: { id: 'ASC' },
@@ -308,26 +564,38 @@ export class QueryExecutorService {
       return;
     }
 
-    // Create college_prompts entries
-    const collegePrompts = systemPrompts.map((prompt, index) => 
+    const entries = systemPrompts.map((prompt, index) =>
       this.collegePromptRepo.create({
         collegeId,
         promptId: prompt.id,
         isEnabled: true,
-        priority: systemPrompts.length - index, // Higher priority for earlier prompts
-      })
+        priority: systemPrompts.length - index,
+      }),
     );
 
-    await this.collegePromptRepo.save(collegePrompts);
-    this.logger.log(`✅ Assigned ${collegePrompts.length} system prompts to college ${collegeId}`);
+    try {
+      await this.collegePromptRepo.save(entries);
+      this.logger.log(`✅ Assigned ${entries.length} system prompts`);
+    } catch (error) {
+      // Handle duplicates gracefully
+      if (error.code === 'ER_DUP_ENTRY' || error.message?.includes('Duplicate')) {
+        this.logger.log('ℹ️ Some prompts already assigned');
+      } else {
+        throw error;
+      }
+    }
   }
+
+  // ============================================================
+  // HELPER: GET OR CREATE CITATION SOURCE
+  // ============================================================
 
   private async getOrCreateSource(
     sourceName: string,
   ): Promise<CitationSource | null> {
     try {
       const normalizedName = sourceName.toLowerCase().trim();
-      
+
       let source = await this.citationSourceRepo.findOne({
         where: { sourceName: normalizedName },
       });
@@ -340,36 +608,88 @@ export class QueryExecutorService {
           isActive: true,
         });
         source = await this.citationSourceRepo.save(source);
-        this.logger.log(`📌 Created new source: ${sourceName}`);
+        this.logger.log(`📌 New source created: ${sourceName}`);
       }
 
       return source;
     } catch (error) {
-      this.logger.warn(`⚠️ Failed to get/create source: ${error.message}`);
+      this.logger.warn(`⚠️ Source creation failed: ${error.message}`);
       return null;
     }
   }
 
+  // ============================================================
+  // HELPER: GET AI ENGINE
+  // ============================================================
+
+  private async getAiEngine(): Promise<AiEngine> {
+    const aiEngine = await this.aiEngineRepo.findOne({
+      where: { engineName: 'chatgpt', isActive: true },
+    });
+
+    if (!aiEngine) {
+      throw new NotFoundException(
+        'ChatGPT AI Engine not configured. Add a row to ai_engines table with engine_name = "chatgpt"',
+      );
+    }
+
+    return aiEngine;
+  }
+
+  // ============================================================
+  // HELPER: RESOLVE PLACEHOLDERS
+  // ============================================================
+
   private resolvePlaceholders(template: string, college: College): string {
     let resolved = template;
 
-    const cityName = college.cityRelation?.cityName || college.city || college.state || 'India';
+    const cityName =
+      college.cityRelation?.cityName || college.city || college.state || 'India';
 
-    const replacements = {
+    const replacements: Record<string, string> = {
       '{city}': cityName,
       '{state}': college.state || '',
       '{college_name}': college.collegeName,
       '{established_year}': college.establishedYear?.toString() || '',
       '{nirf_rank}': college.nirfRank?.toString() || '',
       '{college_type}': college.collegeType || '',
+      '{year}': new Date().getFullYear().toString(),
     };
 
     for (const [placeholder, value] of Object.entries(replacements)) {
-      resolved = resolved.replace(new RegExp(placeholder, 'gi'), value);
+      resolved = resolved.replace(new RegExp(placeholder.replace(/[{}]/g, '\\$&'), 'gi'), value);
     }
 
     return resolved;
   }
+
+  // ============================================================
+  // HELPER: EMPTY RESULT
+  // ============================================================
+
+  private emptyResult(errorMsg: string): ExecutionResult {
+    return {
+      success: false,
+      totalQueries: 0,
+      successfulQueries: 0,
+      failedQueries: 0,
+      totalCost: 0,
+      errors: [errorMsg],
+      summary: {
+        mentioned: 0,
+        notMentioned: 0,
+        avgRank: null,
+        bestRank: null,
+        worstRank: null,
+        avgSignalScore: 0,
+        categoryBreakdown: {},
+      },
+    };
+  }
+
+  // ============================================================
+  // HELPER: DELAY
+  // ============================================================
 
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));

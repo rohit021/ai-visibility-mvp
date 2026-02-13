@@ -73,6 +73,14 @@ export class AiQuery {
   @Column({ name: 'your_college_section', length: 255, nullable: true })
   yourCollegeSection: string;
 
+  @Column({
+    name: 'your_college_section_tier',
+    type: 'enum',
+    enum: ['best_overall', 'strong_private', 'universities_with_engineering', 'other_options', 'not_mentioned', 'unknown'],
+    default: 'not_mentioned',
+  })
+  yourCollegeSectionTier: 'best_overall' | 'strong_private' | 'universities_with_engineering' | 'other_options' | 'not_mentioned' | 'unknown';
+
   @Column({ name: 'your_college_context', type: 'text', nullable: true })
   yourCollegeContext: string;
 
@@ -92,9 +100,23 @@ export class AiQuery {
   createdAt: Date;
   
   @Column({ name: 'signal_score', type: 'int', nullable: true })
-signalScore: number;
+  signalScore: number;
+
+  @Column({ name: 'response_richness_score', type: 'tinyint', default: 0 })
+  responseRichnessScore: number;
+
+  @Column({ name: 'totalCost', type: 'decimal', precision: 10, scale: 7, nullable: true })
+  totalCost: number;
 
   
+  @Column({
+    name: 'query_layer',
+    type: 'enum',
+    enum: ['visibility', 'comparison', 'detail'],
+    default: 'visibility',
+  })
+  query_layer: 'visibility' | 'comparison' | 'detail';
+
   @ManyToOne(() => College, (college) => college.aiQueries)
   @JoinColumn({ name: 'college_id' })
   college: College;

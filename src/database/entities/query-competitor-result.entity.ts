@@ -46,11 +46,28 @@ export class QueryCompetitorResult {
   @Column({ type: 'json', nullable: true })
   strengths: string[];
 
+   @Column({
+    name: 'section_tier',
+    type: 'enum',
+    enum: ['best_overall', 'strong_private', 'universities_with_engineering', 'other_options', 'not_mentioned', 'unknown'],
+    default: 'not_mentioned',
+  })
+  sectionTier: 'best_overall' | 'strong_private' | 'universities_with_engineering' | 'other_options' | 'not_mentioned' | 'unknown';
+
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
   @Column({ name: 'signal_score', type: 'int', nullable: true })
 signalScore: number;
+
+
+
+@Column({ type: 'json', nullable: true })
+weaknesses: string[];
+
+@Column({ name: 'response_richness_score', type: 'int', nullable: true })
+responseRichnessScore: number;
 
   // Relationships
   @ManyToOne(() => AiQuery, (query) => query.competitorResults)

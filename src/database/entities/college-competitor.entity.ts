@@ -16,6 +16,7 @@ export class CollegeCompetitor {
 
   @Column({ name: 'college_id' })
   collegeId: number;
+  
 
   @Column({ name: 'competitor_college_id' })
   competitorCollegeId: number;

@@ -29,6 +29,14 @@ export class Prompt {
   @Column({ name: 'is_system_prompt', default: true })
   isSystemPrompt: boolean;
 
+  @Column({
+    type: 'enum',
+    enum: ['visibility', 'comparison', 'detail'],
+    name: 'query_layer',
+    default: 'visibility',
+  })
+  query_layer: 'visibility' | 'comparison' | 'detail';
+
 
   @Column({ type: 'json', nullable: true })
   placeholders: string[];
