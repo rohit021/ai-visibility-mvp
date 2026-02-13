@@ -161,7 +161,7 @@ export class QueryExecutorService {
           competitorNames,
         );
 
-        console.log("parsed values: ", parsed);
+        console.log("parsed value we get",parsed);
 
         this.logger.log(`📊 Found ${parsed.collegesFound.length} matched colleges (${parsed.totalColleges} total)`);
 
@@ -202,6 +202,7 @@ export class QueryExecutorService {
           rawResponse: result.response,
           responseLength: result.response.length,
           totalCollegesInResponse: parsed.totalColleges,
+          sourceUrl: yourCollege?.sourcesUrl || null,
 
           // Your college results
           yourCollegeMentioned: !!yourCollege,
@@ -283,14 +284,12 @@ export class QueryExecutorService {
     queryLayer: string,
   ): Promise<Prompt[]> {
     // First try college-specific prompts
-    console.log("Loading prompts for college ", collegeId, " and query layer ", queryLayer);
     let collegePrompts = await this.collegePromptRepo.find({
       where: { collegeId, isEnabled: true },
       relations: ['prompt', 'prompt.category'],
       order: { priority: 'DESC', id: 'ASC' },
     });
 
-    console.log("Found college prompts: ", collegePrompts);
 
     // Auto-assign if none exist
     if (collegePrompts.length === 0) {
@@ -355,7 +354,7 @@ export class QueryExecutorService {
       name: string;
       rank: number;
       section: string;
-      sectionTier: string;
+      sectionTier:'best_overall' | 'strong_private' | 'universities_with_engineering' | 'other_options' | 'not_mentioned' | 'unknown';
       context: string;
       reasoning: string;
       sourcesCited: string[];
@@ -363,12 +362,12 @@ export class QueryExecutorService {
       weaknesses: string[];
       signalScore: number;
       responseRichnessScore: number;
+      sourcesUrl?: string | null;
     }>,
     clientCollegeName: string,
     competitorMap: Map<string, number>,
   ): Promise<number> {
 
-    console.log("Saving competitor results for query ", queryId);
     let saved = 0;
 
     for (const collegeResult of collegesFound) {
@@ -383,7 +382,6 @@ export class QueryExecutorService {
         competitorMap,
       );
 
-      console.log(`Mapping "${collegeResult.name}" to competitor ID: ${competitorCollegeId}`);
 
       if (!competitorCollegeId) {
         this.logger.debug(`⬜ Skipping untracked college: "${collegeResult.name}"`);
@@ -405,10 +403,11 @@ export class QueryExecutorService {
           // collegeId: competitorCollegeId,
           rankPosition: collegeResult.rank,
           section: collegeResult.section,
-          // sectionTier: collegeResult.sectionTier,
-          sectionTier: "best_overall",
+          sectionTier: collegeResult.sectionTier,
+          // sectionTier: "best_overall",
           context: collegeResult.context,
           reasoning: collegeResult.reasoning,
+          sourceUrl: collegeResult.sourcesUrl || null,
           sourceId,
           strengths: collegeResult.strengths,
           weaknesses: collegeResult.weaknesses,

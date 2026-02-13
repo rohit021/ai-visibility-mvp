@@ -90,6 +90,9 @@ export class AiQuery {
   @Column({ name: 'your_college_source_id', nullable: true })
   yourCollegeSourceId: number;
 
+  @Column({ name: 'source_url', length: 500, nullable: true })
+  sourceUrl: string;
+
   @Column({ name: 'your_college_strengths', type: 'json', nullable: true })
   yourCollegeStrengths: string[];
 

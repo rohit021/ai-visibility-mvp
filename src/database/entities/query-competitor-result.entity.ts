@@ -85,4 +85,9 @@ responseRichnessScore: number;
   @ManyToOne(() => CitationSource, (source) => source.competitorResults, { nullable: true })
   @JoinColumn({ name: 'source_id' })
   source: CitationSource;
+
+  @Column({ name: 'source_url', length: 500, nullable: true })
+  sourceUrl: string;
+
+
 }

@@ -16,6 +16,7 @@ export interface CollegeInsight {
   sourcesCited: string[];       // Changed: array of sources, not single string
   signalScore: number;
   responseRichnessScore: number; // NEW: how much AI "knows" about this college
+  sourcesUrl?: string | null; // NEW: extracted source URL if available
 }
 
 export interface ParsedResponse {
@@ -23,6 +24,7 @@ export interface ParsedResponse {
   totalColleges: number;
   sourcesCited: string[];
   rankingFactors: string[];
+  sourcesUrl?: string | null; // NEW: extracted source URL if available
 }
 
 export type SectionTier =
@@ -149,6 +151,8 @@ export class ResponseParserService {
     'nba': 'NBA',
     'aicte': 'AICTE',
     'ugc': 'UGC',
+    'wikipedia': 'Wikipedia',
+    'jbknowledgepark':'JB Knowledge Park',
   };
 
   // ============================================================
@@ -172,41 +176,46 @@ export class ResponseParserService {
     const sections = this.detectSections(response);
     this.logger.log(`📂 Detected ${sections.length} sections`);
 
-    // STEP 2: Extract all college blocks from the response
-    const rawBlocks = this.extractCollegeBlocks(response, sections);
-    this.logger.log(`📦 Extracted ${rawBlocks.length} college blocks`);
+    // STEP 2: Extract college blocks ONLY for our college and competitors (skip others)
+    const { blocks: rawBlocks, totalColleges } = this.extractCollegeBlocks(
+      response,
+      sections,
+      allKnownColleges,
+    );
 
-    // STEP 3: Match each block to known colleges and build insights
+    console.log("Extracted raw blocks: ", rawBlocks);
+    this.logger.log(
+      `📦 Extracted ${rawBlocks.length} blocks for tracked colleges (${totalColleges} total in response)`,
+    );
+
+    // STEP 3: Build insights for extracted blocks (all are already matched)
     const collegesFound: CollegeInsight[] = [];
 
     for (const block of rawBlocks) {
       const matchedName = this.findBestMatch(block.name, allKnownColleges);
+      if (!matchedName) continue;
 
-      if (matchedName) {
-        this.logger.log(
-          `  ✅ MATCHED: "${block.name}" → "${matchedName}" (position #${block.position})`,
-        );
+      this.logger.log(
+        `  ✅ MATCHED: "${block.name}" → "${matchedName}" (position #${block.position})`,
+      );
 
-        const insight = this.buildInsight(block, matchedName);
-        collegesFound.push(insight);
+      const insight = this.buildInsight(block, matchedName);
+      collegesFound.push(insight);
 
-        this.logger.log(
-          `     📊 Signal: ${insight.signalScore} | Richness: ${insight.responseRichnessScore} | Tier: ${insight.sectionTier}`,
-        );
-      } else {
-        this.logger.log(`  ⬜ UNMATCHED: "${block.name}" (#${block.position})`);
-      }
+      this.logger.log(
+        `     📊 Signal: ${insight.signalScore} | Richness: ${insight.responseRichnessScore} | Tier: ${insight.sectionTier}`,
+      );
     }
 
     this.logger.log('='.repeat(70));
     this.logger.log(
-      `✅ PARSE COMPLETE: ${collegesFound.length} matched out of ${rawBlocks.length} total`,
+      `✅ PARSE COMPLETE: ${collegesFound.length} matched out of ${totalColleges} total`,
     );
     this.logger.log('='.repeat(70));
 
     return {
       collegesFound,
-      totalColleges: rawBlocks.length,
+      totalColleges,
       sourcesCited: this.extractAllSources(response),
       rankingFactors: this.extractFactors(response),
     };
@@ -276,13 +285,21 @@ export class ResponseParserService {
   // STEP 2: EXTRACT COLLEGE BLOCKS
   // ============================================================
 
+  /**
+   * Extract college blocks from the response.
+   * OPTIMIZATION: When knownColleges is provided, only extracts full context for
+   * our college and competitors. Unmatched colleges are counted but skipped,
+   * saving context collection and parsing work.
+   */
   private extractCollegeBlocks(
     response: string,
     sections: Array<{ lineIndex: number; raw: string; tier: SectionTier }>,
-  ): RawCollegeBlock[] {
+    knownColleges?: string[],
+  ): { blocks: RawCollegeBlock[]; totalColleges: number } {
     const lines = response.split('\n');
     const blocks: RawCollegeBlock[] = [];
     let globalPosition = 0;
+    let totalColleges = 0;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
@@ -292,6 +309,15 @@ export class ResponseParserService {
 
       if (collegeName) {
         globalPosition++;
+        totalColleges++;
+
+        // Skip full extraction for untracked colleges (optimization)
+        if (knownColleges && knownColleges.length > 0) {
+          const matched = this.findBestMatch(collegeName, knownColleges);
+          if (!matched) {
+            continue; // Don't collect context or build block for untracked colleges
+          }
+        }
 
         // Collect context: this line + following lines until next college or section
         let context = line;
@@ -337,7 +363,7 @@ export class ResponseParserService {
       }
     }
 
-    return blocks;
+    return { blocks, totalColleges };
   }
 
   /**
@@ -449,6 +475,7 @@ export class ResponseParserService {
     const weaknesses = this.extractWeaknessSignals(ctx);
     const sources = this.extractSourcesFromContext(ctx);
     const reasoning = this.extractReasoning(ctx);
+    const sourcesUrl = this.extractSourceURL(ctx);
 
     const allStrengths = [
       ...quantitativeSignals,
@@ -476,12 +503,20 @@ export class ResponseParserService {
       sourcesCited: sources,
       signalScore,
       responseRichnessScore,
+      sourcesUrl,
     };
   }
 
   // ============================================================
   // SIGNAL EXTRACTION
   // ============================================================
+
+  private extractSourceURL(text: string): string | null {
+    // const match = text.match(/(?:source|url|link)[^:]*:\s*(https?:\/\/[^\s]+)/i);
+    const urlMatches = text.match(/https?:\/\/[^\s)]+/g);
+    console.log("Extracted source URL: ", urlMatches ? urlMatches[0] : null);
+    return urlMatches ? urlMatches[0] : null;
+  }
 
   /**
    * Quantitative signals: specific numbers and data points
@@ -580,6 +615,8 @@ export class ResponseParserService {
       { word: 'emerging', label: 'Emerging institution mentioned' },
       { word: 'good track record', label: 'Good track record mentioned' },
       { word: 'decent', label: 'Decent quality mentioned' },
+      { word: 'placement cell', label: 'Dedicated Placement cell mentioned' },
+      { word: 'strong placement', label: 'Strong placement record mentioned' },
     ];
 
     for (const item of narrativeWords) {
@@ -693,10 +730,11 @@ export class ResponseParserService {
   const sources: string[] = [];
 
   // ✅ STEP 1: Extract all URLs
+  console.log("Extracting sources from context:", text);
   const urlMatches = text.match(/https?:\/\/[^\s)]+/g);
 
-  console.log("urlMatches", urlMatches);
-    
+  console.log("URL Matches:", urlMatches);
+
   if (urlMatches) {
     for (const rawUrl of urlMatches) {
       try {
@@ -715,7 +753,7 @@ export class ResponseParserService {
     }
   }
 
-  console.log("sources for now", sources);
+  console.log("Sources after URL extraction:", sources);
 
   // ✅ STEP 2: Fallback to parenthetical short citations (e.g., (Shiksha), (NIRF 2024))
   const parenMatches = text.matchAll(/\(([^)]{2,50})\)/g);
@@ -740,8 +778,6 @@ export class ResponseParserService {
       sources.push(displayName);
     }
   }
-
-  console.log("return sources", sources);
 
   return sources;
 }
