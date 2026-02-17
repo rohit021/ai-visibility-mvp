@@ -13,6 +13,9 @@ import { CollegeCompetitor } from '../database/entities/college-competitor.entit
 import { AiEngine } from '../database/entities/ai-engine.entity';
 import { CitationSource } from '../database/entities/citation-source.entity';
 import { CollegePrompt } from '../database/entities/college-prompt.entity';
+import { ComparisonParserService } from './services/comparison-analytics-parser';
+import { FeatureComparison } from '../database/entities/feature-comparison.entity';
+
 
 @Module({
   imports: [
@@ -26,10 +29,11 @@ import { CollegePrompt } from '../database/entities/college-prompt.entity';
       CollegeCompetitor,
       AiEngine,
       CitationSource,
+      FeatureComparison,
     ]),
   ],
   controllers: [AiEngineController],
-  providers: [QueryExecutorService, OpenAIService, ResponseParserService],
+  providers: [QueryExecutorService, OpenAIService, ResponseParserService, ComparisonParserService],
   exports: [QueryExecutorService],
 })
 export class AiEngineModule {}

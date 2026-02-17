@@ -8,7 +8,11 @@ import {
   Query,
   NotFoundException,
   ForbiddenException,
+   Logger,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
+
 import { QueryExecutorService } from './services/query-executor.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -21,6 +25,7 @@ import { CollegePrompt } from '../database/entities/college-prompt.entity';
 @Controller('ai-queries')
 @UseGuards(JwtAuthGuard)
 export class AiEngineController {
+  private readonly logger = new Logger(AiEngineController.name);
   constructor(
     private queryExecutor: QueryExecutorService,
     @InjectRepository(AiQuery)
@@ -80,6 +85,61 @@ export class AiEngineController {
 
     return this.queryExecutor.executeQueriesForCollege(collegeId);
   }
+
+
+  /** Queries for comparison  */
+
+    @Post('execute-comparison-queries/:collegeId/:comparisonCollegeId')
+  async executeComparisonQueries(
+    @Param('collegeId', ParseIntPipe) collegeId: number,
+    @Param('comparisonCollegeId', ParseIntPipe) comparisonCollegeId: number,
+    @CurrentUser() user: any,
+  ) {
+    // Verify user has active subscription for this college
+    const subscription = await this.subscriptionRepo.findOne({
+      where: { 
+        userId: user.userId, 
+        collegeId, 
+        isActive: true 
+      },
+    });
+
+    if (!subscription) {
+      throw new NotFoundException(
+        'You do not have an active subscription for this college',
+      );
+    }
+
+    // Check subscription status
+    if (subscription.status === 'expired' || subscription.status === 'cancelled') {
+      throw new ForbiddenException(
+        'Your subscription has expired. Please renew to execute queries.',
+      );
+    }
+
+    try {
+      const result = await this.queryExecutor.executeComparisonQueries(
+        collegeId,
+        comparisonCollegeId,
+      );
+
+      return {
+        success: true,
+        message: 'Comparison queries executed successfully',
+        data: result,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to execute comparison queries: ${error.message}`,
+      );
+      throw new HttpException(
+        error.message || 'Failed to execute comparison queries',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+  }
+
 
   /**
    * Get all queries for a college (simple endpoint)

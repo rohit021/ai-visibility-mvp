@@ -11,6 +11,8 @@ import { CollegePrompt } from '../../database/entities/college-prompt.entity';
 import { CollegeCompetitor } from '../../database/entities/college-competitor.entity';
 import { AiEngine } from '../../database/entities/ai-engine.entity';
 import { CitationSource } from '../../database/entities/citation-source.entity';
+import {ComparisonParserService} from '../services/comparison-analytics-parser';
+import { FeatureComparison } from '../../database/entities/feature-comparison.entity';
 
 export interface ExecutionResult {
   success: boolean;
@@ -55,8 +57,11 @@ export class QueryExecutorService {
     private aiEngineRepo: Repository<AiEngine>,
     @InjectRepository(CitationSource)
     private citationSourceRepo: Repository<CitationSource>,
+    @InjectRepository(FeatureComparison)
+    private featureComparisonRepo: Repository<FeatureComparison>,
     private openaiService: OpenAIService,
     private parserService: ResponseParserService,
+    private ComparisonParserService: ComparisonParserService,
   ) {}
 
   // ============================================================
@@ -693,4 +698,218 @@ export class QueryExecutorService {
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+
+
+
+   async executeComparisonQueries(
+    collegeId: number,
+    competitorId: number,
+  )
+  // : Promise<{
+  //   totalQueries: number;
+  //   successfulQueries: number;
+  //   failedQueries: number;
+  //   totalFeatures: number;
+  //   executionTime: number;
+  // }> 
+  { 
+  const startTime = Date.now();
+     const college = await this.collegeRepo.findOne({
+      where: { id: collegeId },
+    });
+
+    if (!college) {
+      throw new NotFoundException(`College with ID ${collegeId} not found`);
+    }
+
+    // Step 2: Fetch competitor college
+    const competitor = await this.collegeRepo.findOne({
+      where: { id: competitorId },
+    });
+
+    if (!competitor) {
+      throw new NotFoundException(
+        `Competitor college with ID ${competitorId} not found`,
+      );
+    }
+
+  const prompts = await this.loadPrompts(collegeId, "comparison");
+  // console.log("prompts for comparison",prompts);
+
+  const aiEngine = await this.aiEngineRepo.findOne({
+      where: { engineName: 'chatgpt', isActive: true },
+    });
+
+    if (!aiEngine) {
+      throw new NotFoundException('No active AI engine found');
+    }
+
+    // Step 5: Execute queries one by one
+    let successfulQueries = 0;
+    let failedQueries = 0;
+    let totalFeatures = 0;
+
+    for (const prompt of prompts) {
+      try {
+        const result = await this.executeAndParseSingleQuery(
+          prompt,
+          college,
+          competitor,
+          aiEngine,
+        );
+
+        if (result.success) {
+          successfulQueries++;
+          totalFeatures += result.featuresExtracted;
+        } else {
+          failedQueries++;
+        }
+
+        // Rate limiting: wait 2 seconds between queries
+        await this.delay(2000);
+      } catch (error) {
+        this.logger.error(
+          `Failed to execute prompt ${prompt.id}: ${error.message}`,
+        );
+        failedQueries++;
+      }
+    }
+
+    const executionTime = Date.now() - startTime;
+
+    this.logger.log(
+      `Comparison execution completed: ${successfulQueries}/${prompts.length} successful, ${totalFeatures} features extracted`,
+    );
+
+    return {
+      totalQueries: prompts.length,
+      successfulQueries,
+      failedQueries,
+      totalFeatures,
+      executionTime,
+    };
+  }
+
+
+  private async executeAndParseSingleQuery(
+    prompt: Prompt,
+    college: College,
+    competitor: College,
+    aiEngine: AiEngine,
+  ): Promise<{ success: boolean; featuresExtracted: number }> {
+    // Step 1: Replace placeholders
+    const resolvedPrompt = this.replacePlaceholders(
+      prompt.promptTemplate,
+      college,
+      competitor,
+    );
+
+    // this.logger.debug(`Executing: ${resolvedPrompt}`);
+
+    // return {
+    //   success: false,
+    //   featuresExtracted: 0,
+    // }
+
+    // Step 2: Create AI query record
+    const aiQuery = this.queryRepo.create({
+      collegeId: college.id,
+      promptId: prompt.id,
+      aiEngineId: aiEngine.id,
+      query_layer: 'comparison',
+      resolvedPromptText: resolvedPrompt,
+      executionStatus: 'pending',
+    });
+
+    await this.queryRepo.save(aiQuery);
+
+    try {
+      // Step 3: Execute query via AI engine
+      const response = await this.openaiService.executeQueryForComparison(resolvedPrompt);
+
+      // Step 4: Update query with response
+      aiQuery.rawResponse = response.response;
+      aiQuery.responseLength = response.response.length;
+      aiQuery.executionStatus = 'success';
+      aiQuery.executedAt = new Date();
+      aiQuery.totalCost = response.cost || 0;
+       await this.queryRepo.save(aiQuery);
+
+      // Step 5: Parse comparison response
+      const responsefromdb = await this.queryRepo.findOne({ where: { id: aiQuery.id } });
+      // console.log("responsefromdb",responsefromdb);
+      const analysis = this.ComparisonParserService.parseComparisonResponse(
+        responsefromdb.rawResponse,
+        college.collegeName,
+        competitor.collegeName,
+      );
+
+      this.logger.debug(
+        `Parsed ${analysis.features.length} features from response`,
+      );
+
+      // Step 6: Save feature battles
+      for (const feature of analysis.features) {
+        const featureComparison = this.featureComparisonRepo.create({
+          queryId: aiQuery.id,
+          collegeId: college.id,
+          competitorCollegeId: competitor.id,
+          featureName: feature.featureName,
+          winner: feature.winner,
+          confidenceLevel: feature.confidenceLevel,
+          clientReasoning: feature.clientReasoning,
+          competitorReasoning: feature.competitorReasoning,
+          clientDataPoints: feature.clientDataPoints,
+          competitorDataPoints: feature.competitorDataPoints,
+          sources: feature.sources,
+          dataGapIdentified: feature.dataGapIdentified,
+        });
+
+        await this.featureComparisonRepo.save(featureComparison);
+      }
+
+      return {
+        success: true,
+        featuresExtracted: analysis.features.length,
+      };
+    } catch (error) {
+      // Update query status to failed
+      aiQuery.executionStatus = 'failed';
+      aiQuery.errorMessage = error.message;
+      await this.queryRepo.save(aiQuery);
+
+      this.logger.error(`Query execution failed: ${error.message}`);
+
+      return {
+        success: false,
+        featuresExtracted: 0,
+      };
+    }
+  }
+
+    private replacePlaceholders(
+    template: string,
+    college: College,
+    competitor: College,
+  ): string {
+    let resolved = template;
+
+    // Replace college placeholders
+    resolved = resolved.replace(/{college_name}/g, college.collegeName);
+    resolved = resolved.replace(/{city}/g, college.city || '');
+    resolved = resolved.replace(/{state}/g, college.state || '');
+
+    // Replace competitor placeholders
+    resolved = resolved.replace(/{competitor_name}/g, competitor.collegeName);
+    resolved = resolved.replace(/{competitor_city}/g, competitor.city || '');
+
+    return resolved;
+  }
+
+
+  
+  
+
+
+
 }

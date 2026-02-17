@@ -13,6 +13,7 @@ import { Prompt } from './prompt.entity';
 import { AiEngine } from './ai-engine.entity';
 import { CitationSource } from './citation-source.entity';
 import { QueryCompetitorResult } from './query-competitor-result.entity';
+import { FeatureComparison } from './feature-comparison.entity';
 // import { RecommendationAffectedQuery } from './recommendation-affected-query.entity';
 
 @Entity('ai_queries')
@@ -138,6 +139,10 @@ export class AiQuery {
 
   @OneToMany(() => QueryCompetitorResult, (result) => result.query)
   competitorResults: QueryCompetitorResult[];
+
+
+  @OneToMany(() => FeatureComparison, (feature) => feature.query)
+featureComparisons: FeatureComparison[];
 
   // @OneToMany(() => RecommendationAffectedQuery, (raq) => raq.query)
   // affectedRecommendations: RecommendationAffectedQuery[];
