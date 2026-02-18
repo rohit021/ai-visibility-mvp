@@ -141,6 +141,43 @@ export class AiEngineController {
   }
 
 
+
+  @Post('execute-detail/:collegeId')
+  async executeDetailQueries(
+    @Param('collegeId', ParseIntPipe) collegeId: number,
+    @CurrentUser() user: any,
+  ) {
+    const subscription = await this.subscriptionRepo.findOne({
+      where: { userId: user.userId, collegeId, isActive: true },
+    });
+
+    if (!subscription) {
+      throw new NotFoundException('You do not have an active subscription for this college');
+    }
+
+    if (subscription.status === 'expired' || subscription.status === 'cancelled') {
+      throw new ForbiddenException('Your subscription has expired. Please renew to execute queries.');
+    }
+
+    try {
+      console.log("inside of executeDetailQueries controller method for collegeId:", collegeId);
+      const result = await this.queryExecutor.executeDetailQueries(collegeId);
+      return {
+        success: true,
+        message: 'Layer 3 detail queries executed successfully',
+        data: result,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to execute detail queries: ${error.message}`);
+      throw new HttpException(
+        error.message || 'Failed to execute detail queries',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+
+
   /**
    * Get all queries for a college (simple endpoint)
    */

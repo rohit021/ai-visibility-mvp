@@ -13,6 +13,9 @@ import { AiEngine } from '../../database/entities/ai-engine.entity';
 import { CitationSource } from '../../database/entities/citation-source.entity';
 import {ComparisonParserService} from '../services/comparison-analytics-parser';
 import { FeatureComparison } from '../../database/entities/feature-comparison.entity';
+import { CollegeAiProfile } from '@/database/entities/college-ai-profiles.entity';
+import { CollegeAiProfileHistory } from '@/database/entities/college-ai-profile-history.entity';
+import { DetailParserService } from './detail.parser.service';
 
 export interface ExecutionResult {
   success: boolean;
@@ -59,9 +62,14 @@ export class QueryExecutorService {
     private citationSourceRepo: Repository<CitationSource>,
     @InjectRepository(FeatureComparison)
     private featureComparisonRepo: Repository<FeatureComparison>,
+    @InjectRepository(CollegeAiProfile)
+    private collegeAiProfileRepo: Repository<CollegeAiProfile>,
+    @InjectRepository(CollegeAiProfileHistory)
+    private collegeAiProfileHistoryRepo: Repository<CollegeAiProfileHistory>,
     private openaiService: OpenAIService,
     private parserService: ResponseParserService,
     private ComparisonParserService: ComparisonParserService,
+    private detailParserService: DetailParserService,
   ) {}
 
   // ============================================================
@@ -907,8 +915,257 @@ export class QueryExecutorService {
   }
 
 
-  
-  
+ async executeDetailQueries(clientCollegeId: number): Promise<{
+    success: boolean;
+    collegeName: string;
+    completenessScore: number;
+    fieldsPopulated: number;
+    missingFields: string[];
+    cost: number;
+    error?: string;
+  }> {
+    this.logger.log(`\n${'🔍'.repeat(3)} LAYER 3 — CLIENT DETAIL QUERY`);
+    this.logger.log(`   College ID: ${clientCollegeId}`);
+    this.logger.log('='.repeat(70));
+
+    // ── 1. Load client college ──
+    const clientCollege = await this.collegeRepo.findOne({
+      where: { id: clientCollegeId, isActive: true },
+    });
+
+    if (!clientCollege) {
+      throw new NotFoundException(`College ${clientCollegeId} not found`);
+    }
+
+    this.logger.log(`📚 College: ${clientCollege.collegeName}`);
+
+    // ── 2. Get AI engine + run date ──
+    const aiEngine = await this.getAiEngine();
+    const runDate = new Date().toISOString().split('T')[0];
+
+    // ── 3. Call OpenAI ──
+    const result = await this.openaiService.executeDetailQuery(clientCollege.collegeName);
+
+    // ── 4. Save ai_queries record (always — even on failure) ──
+    const aiQuery = this.queryRepo.create({
+      collegeId:          clientCollegeId,
+      promptId:           40,
+      aiEngineId:         aiEngine.id,
+      query_layer:        'detail',
+      resolvedPromptText: `Tell me everything about ${clientCollege.collegeName} BTech placements average package fees NIRF ranking NAAC grade infrastructure student reviews and top recruiters`,
+      executedAt:         new Date(),
+      executionStatus:    result.success ? 'success' : 'failed',
+      rawResponse:        result.response || null,
+      responseLength:     result.response?.length || 0,
+      errorMessage:       result.error || null,
+      totalCost:          result.cost || 0,
+    });
+
+    const savedQuery = await this.queryRepo.save(aiQuery);
+    this.logger.log(`💾 ai_queries record saved: #${savedQuery.id}`);
+
+    // ── 5. If API failed — return early ──
+    if (!result.success || !result.response) {
+      this.logger.error(`❌ OpenAI call failed: ${result.error}`);
+      return {
+        success:          false,
+        collegeName:      clientCollege.collegeName,
+        completenessScore: 0,
+        fieldsPopulated:  0,
+        missingFields:    [],
+        cost:             result.cost || 0,
+        error:            result.error,
+      };
+    }
+
+    // ── 6. Parse the JSON response + score it ──
+    const parsed = this.detailParserService.parseDetailResponse(
+      result.response,
+      clientCollege.collegeName,
+    );
+
+    this.logger.log(
+      `📊 Completeness: ${parsed.fieldsPopulated}/20 fields (${parsed.dataCompletenessScore}%)`,
+    );
+    this.logger.log(`🔎 Missing: [${parsed.missingFields.join(', ')}]`);
+
+    // ── 7. Upsert college_ai_profiles (Table 1 — latest data) ──
+    await this.upsertCollegeAiProfile(
+      clientCollegeId,
+      savedQuery.id,
+      true,        // isClientCollege = true
+      parsed,
+      runDate,
+    );
+
+    // ── 8. Get previous snapshot for delta calculation ──
+    const previousSnapshot = await this.getPreviousSnapshot(clientCollegeId, runDate);
+
+    // ── 9. Append college_ai_profile_history (Table 2 — weekly snapshot) ──
+    await this.insertProfileHistory(
+      clientCollegeId,
+      clientCollegeId,   // clientCollegeId same as collegeId for client rows
+      savedQuery.id,
+      true,              // isClientCollege = true
+      runDate,
+      parsed,
+      previousSnapshot,
+      null,              // bestCompetitorScore — not calculated yet (no competitor run)
+      null,              // bestCompetitorName
+      result.cost || 0,
+    );
+
+    this.logger.log('='.repeat(70));
+    this.logger.log(`✅ LAYER 3 DONE — ${clientCollege.collegeName}`);
+    this.logger.log(`   Score: ${parsed.dataCompletenessScore}% | Fields: ${parsed.fieldsPopulated}/20`);
+    this.logger.log('='.repeat(70));
+
+    return {
+      success:           true,
+      collegeName:       clientCollege.collegeName,
+      completenessScore: parsed.dataCompletenessScore,
+      fieldsPopulated:   parsed.fieldsPopulated,
+      missingFields:     parsed.missingFields,
+      cost:              result.cost || 0,
+    };
+  }
+
+  private async upsertCollegeAiProfile(
+    collegeId: number,
+    queryId: number,
+    isClient: boolean,
+    parsed: any,
+    runDate: string,
+  ): Promise<void> {
+    const existing = await this.collegeAiProfileRepo.findOne({ where: { collegeId } });
+
+    if (existing) {
+      existing.lastQueryId           = queryId;
+      existing.isClientCollege       = isClient;
+      existing.placementsData        = parsed.placementsData;
+      existing.feesData              = parsed.feesData;
+      existing.accreditationData     = parsed.accreditationData;
+      existing.facultyData           = parsed.facultyData;
+      existing.infrastructureData    = parsed.infrastructureData;
+      existing.reviewsData           = parsed.reviewsData;
+      existing.sources               = parsed.sources;
+      existing.dataCompletenessScore = parsed.dataCompletenessScore;
+      existing.fieldsPopulated       = parsed.fieldsPopulated;
+      existing.fieldsTotal           = parsed.fieldsTotal;
+      existing.missingFields         = parsed.missingFields;
+      existing.lastRunDate           = runDate;
+      existing.runCount              = (existing.runCount || 0) + 1;
+      await this.collegeAiProfileRepo.save(existing);
+      this.logger.log(`♻️  Updated profile (run #${existing.runCount})`);
+    } else {
+      const newProfile = this.collegeAiProfileRepo.create({
+        collegeId,
+        lastQueryId:           queryId,
+        isClientCollege:       isClient,
+        placementsData:        parsed.placementsData,
+        feesData:              parsed.feesData,
+        accreditationData:     parsed.accreditationData,
+        facultyData:           parsed.facultyData,
+        infrastructureData:    parsed.infrastructureData,
+        reviewsData:           parsed.reviewsData,
+        sources:               parsed.sources,
+        dataCompletenessScore: parsed.dataCompletenessScore,
+        fieldsPopulated:       parsed.fieldsPopulated,
+        fieldsTotal:           parsed.fieldsTotal,
+        missingFields:         parsed.missingFields,
+        lastRunDate:           runDate,
+        runCount:              1,
+      });
+      await this.collegeAiProfileRepo.save(newProfile);
+      this.logger.log(`🆕 Created new profile`);
+    }
+  }
+
+  private async insertProfileHistory(
+    collegeId: number,
+    clientCollegeId: number,
+    queryId: number,
+    isClient: boolean,
+    runDate: string,
+    parsed: any,
+    previousSnapshot: { completenessScore: number; missingFields: string[] } | null,
+    bestCompetitorScore: number | null,
+    bestCompetitorName: string | null,
+    queryCost: number,
+  ): Promise<void> {
+    const scoreChange = previousSnapshot
+      ? parsed.dataCompletenessScore - previousSnapshot.completenessScore
+      : null;
+
+    const newlyPopulatedFields = previousSnapshot
+      ? previousSnapshot.missingFields.filter(
+          (field) => !parsed.missingFields.includes(field),
+        )
+      : null;
+
+    const gapVsBestCompetitor =
+      isClient && bestCompetitorScore !== null
+        ? parsed.dataCompletenessScore - bestCompetitorScore
+        : null;
+
+    try {
+      const historyRow = this.collegeAiProfileHistoryRepo.create({
+        collegeId,
+        clientCollegeId,
+        queryId,
+        isClientCollege:      isClient,
+        runDate,
+        completenessScore:    parsed.dataCompletenessScore,
+        fieldsPopulated:      parsed.fieldsPopulated,
+        scoreChange,
+        missingFields:        parsed.missingFields,
+        newlyPopulatedFields: newlyPopulatedFields?.length ? newlyPopulatedFields : null,
+        bestCompetitorScore,
+        gapVsBestCompetitor,
+        bestCompetitorName,
+        queryCost,
+      });
+
+      await this.collegeAiProfileHistoryRepo.save(historyRow);
+      this.logger.log(`📅 History snapshot saved for ${runDate}`);
+    } catch (error) {
+      if (error.code === 'ER_DUP_ENTRY' || error.message?.includes('Duplicate')) {
+        this.logger.warn(`⚠️ History already exists for college ${collegeId} on ${runDate} — skipping`);
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  private async getPreviousSnapshot(
+    collegeId: number,
+    currentRunDate: string,
+  ): Promise<{ completenessScore: number; missingFields: string[] } | null> {
+    const previous = await this.collegeAiProfileHistoryRepo.findOne({
+      where: { collegeId },
+      order: { runDate: 'DESC' },
+    });
+
+    if (!previous || previous.runDate === currentRunDate) return null;
+
+    return {
+      completenessScore: previous.completenessScore,
+      missingFields:     previous.missingFields || [],
+    };
+  }
+
+  private async getBestCompetitorProfile(
+    competitorCollegeIds: number[],
+  ): Promise<CollegeAiProfile | null> {
+    if (!competitorCollegeIds.length) return null;
+
+    return this.collegeAiProfileRepo
+      .createQueryBuilder('profile')
+      .leftJoinAndSelect('profile.college', 'college')
+      .where('profile.college_id IN (:...ids)', { ids: competitorCollegeIds })
+      .orderBy('profile.data_completeness_score', 'DESC')
+      .getOne();
+  }
 
 
 

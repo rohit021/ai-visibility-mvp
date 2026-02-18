@@ -368,6 +368,151 @@ Compare the two colleges across these exact features:
     }
   }
 
+  private getDetailSystemPrompt(): string {
+    return `You are a college research expert specializing in Indian engineering colleges.
+
+When asked about a specific college, extract all available data and return it as a single valid JSON object.
+
+**CRITICAL: Return ONLY valid JSON. No text before or after. No markdown fences.**
+
+Return this exact structure:
+
+{
+  "collegeName": "Full official college name",
+  "placements": {
+    "placementRate": "85%" or null,
+    "averagePackage": "₹5.8 LPA" or null,
+    "highestPackage": "₹12 LPA" or null,
+    "topRecruiters": ["Company1", "Company2"] or null,
+    "batchYear": "2024" or null
+  },
+  "fees": {
+    "btechAnnual": "₹2.5 Lakh" or null,
+    "hostel": "₹1.2 Lakh" or null,
+    "totalProgram": "₹10 Lakh" or null
+  },
+  "accreditation": {
+    "naacGrade": "A+" or null,
+    "nirfRank": "201-300" or null,
+    "nbaAccredited": true or null,
+    "ugcRecognized": true or null
+  },
+  "faculty": {
+    "totalFaculty": "120" or null,
+    "phdPercentage": "65%" or null,
+    "studentFacultyRatio": "15:1" or null
+  },
+  "infrastructure": {
+    "campusSize": "110 acres" or null,
+    "facilities": ["Labs", "Library", "Hostel"] or null,
+    "hostelAvailable": true or null
+  },
+  "reviews": {
+    "overallSentiment": "positive" or "negative" or "mixed" or null,
+    "commonPraises": ["campus", "placement support"] or null,
+    "commonComplaints": ["fees", "management"] or null,
+    "averageRating": "3.8/5" or null
+  },
+  "sources": ["https://example.com/page"]
+}
+
+**Rules:**
+- Use null for any field you cannot find real data for. Do NOT guess or fabricate.
+- overallSentiment must be exactly: "positive", "negative", "mixed", or null
+- nirfRank can be a range like "201-300" or an exact number like "45" — keep as string
+- topRecruiters and facilities must be arrays, not comma-separated strings
+- sources must be real URLs you actually found data from
+- Do NOT include any explanation, preamble, or text outside the JSON object`;
+  }
+
+  async executeDetailQuery(collegeName: string): Promise<QueryResult> {
+    const startTime = Date.now();
+    const prompt = `Tell me everything about ${collegeName} BTech placements average package fees NIRF ranking NAAC grade infrastructure student reviews and top recruiters`;
+
+    try {
+      this.logger.log(`🔍 Detail query for: "${collegeName}"`);
+
+      const response = await axios.post(
+        this.apiUrl,
+        {
+          model: this.model,
+          messages: [
+            {
+              role: 'system',
+              content: this.getDetailSystemPrompt(),
+            },
+            {
+              role: 'user',
+              content: prompt,
+            },
+          ],
+          max_tokens: 2000,
+          web_search_options: {
+            search_context_size: 'high',
+          },
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 60000,
+        },
+      );
+
+      const aiResponse = response.data.choices[0].message.content;
+      const usage = response.data.usage;
+      const executionTime = Date.now() - startTime;
+      const cost = this.calculateCost(
+        usage?.prompt_tokens || 0,
+        usage?.completion_tokens || 0,
+      );
+
+      this.logger.log(
+        `✅ Detail response: ${aiResponse.length} chars | ${usage?.total_tokens || 0} tokens | ${executionTime}ms`,
+      );
+
+      return {
+        success: true,
+        response: aiResponse,
+        tokensUsed: usage?.total_tokens || 0,
+        executionTime,
+        model: this.model,
+        cost,
+      };
+    } catch (error) {
+      const executionTime = Date.now() - startTime;
+
+      if (axios.isAxiosError(error)) {
+        const axiosError = error as AxiosError;
+        const status = axiosError.response?.status;
+        const errorMessage =
+          axiosError.response?.data?.['error']?.['message'] || axiosError.message;
+
+        this.logger.error(`❌ Detail query error (${status}): ${errorMessage}`);
+
+        return {
+          success: false,
+          error: `ChatGPT API error (${status}): ${errorMessage}`,
+          executionTime,
+          model: this.model,
+        };
+      }
+
+      this.logger.error(`❌ Unexpected error: ${error.message}`);
+      return {
+        success: false,
+        error: error.message,
+        executionTime,
+        model: this.model,
+      };
+    }
+  }
+
+
+
+
+
   /**
    * gpt-4o-mini pricing (as of 2025):
    * Input: $0.150 per 1M tokens
