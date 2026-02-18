@@ -16,6 +16,9 @@ import { FeatureComparison } from '../../database/entities/feature-comparison.en
 import { CollegeAiProfile } from '@/database/entities/college-ai-profiles.entity';
 import { CollegeAiProfileHistory } from '@/database/entities/college-ai-profile-history.entity';
 import { DetailParserService } from './detail.parser.service';
+import { CollegeWebsiteScrape } from '@/database/entities/college-website-scrap.entity';
+import { CollegeScrapedPage } from '@/database/entities/college-scraped-pages.entity';
+import puppeteer from 'puppeteer';
 
 export interface ExecutionResult {
   success: boolean;
@@ -66,6 +69,10 @@ export class QueryExecutorService {
     private collegeAiProfileRepo: Repository<CollegeAiProfile>,
     @InjectRepository(CollegeAiProfileHistory)
     private collegeAiProfileHistoryRepo: Repository<CollegeAiProfileHistory>,
+    @InjectRepository(CollegeWebsiteScrape)
+    private scrapeRepo: Repository<CollegeWebsiteScrape>,
+    @InjectRepository(CollegeScrapedPage)
+    private pageRepo: Repository<CollegeScrapedPage>,
     private openaiService: OpenAIService,
     private parserService: ResponseParserService,
     private ComparisonParserService: ComparisonParserService,
@@ -1166,6 +1173,293 @@ export class QueryExecutorService {
       .orderBy('profile.data_completeness_score', 'DESC')
       .getOne();
   }
+
+
+async scrapeCollegeWebsite(collegeId: number): Promise<{
+    success: boolean;
+    scrapeId: number;
+    pagesScraped: number;
+    pagesFailed: number;
+    totalDuration: number;
+  }> {
+    const startTime = Date.now();
+
+    this.logger.log(`🔍 Starting website scrape for college ID: ${collegeId}`);
+
+    // ── 1. Load college from DB ──
+    const college = await this.collegeRepo.findOne({
+      where: { id: collegeId, isActive: true },
+    });
+
+    if (!college) {
+      throw new NotFoundException(`College ${collegeId} not found`);
+    }
+
+    if (!college.website) {
+      throw new NotFoundException(`College ${collegeId} has no website URL in database`);
+    }
+
+    this.logger.log(`📚 College: ${college.collegeName}`);
+    this.logger.log(`🌐 Website: ${college.website}`);
+
+    // ── 2. Build target URLs ──
+    // Note: Don't append to base URL - Amity uses full direct URLs
+    const targetUrls = this.buildTargetUrls(college.website);
+
+    this.logger.log(`📋 Target pages: ${targetUrls.length}`);
+
+    // ── 3. Create parent scrape record ──
+    const scrapeRecord = this.scrapeRepo.create({
+      collegeId,
+      pagesScraped: targetUrls,
+      scrapeStatus: 'partial', // will update at the end
+    });
+
+    const savedScrape = await this.scrapeRepo.save(scrapeRecord);
+    const scrapeId = savedScrape.id;
+
+    this.logger.log(`💾 Created scrape record: #${scrapeId}`);
+
+    // ── 4. Scrape each page ──
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < targetUrls.length; i++) {
+      const url = targetUrls[i];
+      const pageType = this.detectPageType(url);
+
+      this.logger.log(`\n[${'─'.repeat(60)}]`);
+      this.logger.log(`📄 [${i + 1}/${targetUrls.length}] ${pageType}: ${url}`);
+
+      try {
+        const pageData = await this.scrapePage(url);
+
+        // Save page to DB
+        const pageRecord = this.pageRepo.create({
+          collegeId,
+          scrapeId,
+          pageUrl: url,
+          pageType,
+          rawHtml: pageData.html,
+          plaintext: pageData.plaintext,
+          pageTitle: pageData.title,
+          httpStatusCode: pageData.statusCode,
+          loadTimeMs: pageData.loadTime,
+          contentLength: pageData.html?.length || 0,
+          scrapeStatus: 'success',
+        });
+
+        await this.pageRepo.save(pageRecord);
+
+        this.logger.log(`✅ Saved page (${(pageData.html?.length || 0) / 1024}KB)`);
+        successCount++;
+      } catch (error) {
+        this.logger.error(`❌ Failed: ${error.message}`);
+
+        // Save failed page record
+        const pageRecord = this.pageRepo.create({
+          collegeId,
+          scrapeId,
+          pageUrl: url,
+          pageType,
+          httpStatusCode: error.statusCode || null,
+          scrapeStatus: 'failed',
+          errorMessage: error.message,
+        });
+
+        await this.pageRepo.save(pageRecord);
+        failCount++;
+      }
+
+      // Rate limiting: 2s between requests
+      if (i < targetUrls.length - 1) {
+        await this.delay(2000);
+      }
+    }
+
+    // ── 5. Update parent scrape record ──
+    const totalDuration = Date.now() - startTime;
+
+    savedScrape.pagesSuccessCount = successCount;
+    savedScrape.pagesFailedCount = failCount;
+    savedScrape.scrapeDurationMs = totalDuration;
+    savedScrape.scrapeStatus = successCount > 0 ? 'partial' : 'failed';
+
+    if (successCount === targetUrls.length) {
+      savedScrape.scrapeStatus = 'success';
+    }
+
+    await this.scrapeRepo.save(savedScrape);
+
+    this.logger.log(`\n${'='.repeat(70)}`);
+    this.logger.log(`🏁 SCRAPE COMPLETE`);
+    this.logger.log(`   ✅ Success: ${successCount}`);
+    this.logger.log(`   ❌ Failed:  ${failCount}`);
+    this.logger.log(`   ⏱️  Duration: ${(totalDuration / 1000).toFixed(1)}s`);
+    this.logger.log('='.repeat(70));
+
+    return {
+      success: successCount > 0,
+      scrapeId,
+      pagesScraped: successCount,
+      pagesFailed: failCount,
+      totalDuration,
+    };
+  }
+
+  private async scrapePage(url: string): Promise<{
+    html: string;
+    plaintext: string;
+    title: string;
+    statusCode: number;
+    loadTime: number;
+  }> {
+    const startTime = Date.now();
+    let browser;
+
+    try {
+      browser = await puppeteer.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+        ],
+      });
+
+      const page = await browser.newPage();
+
+      // Set user agent to avoid blocking
+      await page.setUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      );
+
+      // Set viewport
+      await page.setViewport({ width: 1920, height: 1080 });
+
+      const response = await page.goto(url, {
+        waitUntil: 'networkidle2',
+        timeout: 30000,
+      });
+
+      const statusCode = response?.status() || 0;
+
+      // Allow 200, 301, 302 as success
+      if (statusCode >= 400) {
+        await browser.close();
+        throw { message: `HTTP ${statusCode}`, statusCode };
+      }
+
+      // Get HTML and plaintext
+      const html = await page.content();
+      const plaintext = await page.evaluate(() => document.body?.innerText || '');
+      const title = await page.title();
+
+      const loadTime = Date.now() - startTime;
+
+      await browser.close();
+
+      return { html, plaintext, title, statusCode, loadTime };
+    } catch (error) {
+      if (browser) {
+        await browser.close();
+      }
+
+      // Transform error into a consistent format
+      if (error.message?.includes('timeout')) {
+        throw { message: 'Page load timeout (30s exceeded)', statusCode: 0 };
+      }
+      if (error.message?.includes('net::ERR')) {
+        throw { message: 'Network error - page not found', statusCode: 0 };
+      }
+
+      throw error;
+    }
+  }
+
+  private buildTargetUrls(websiteUrl: string): string[] {
+    // Remove trailing slash
+    const baseUrl = websiteUrl.replace(/\/$/, '');
+
+    // For Amity Gurugram/Gurgaon - use actual working URLs from their site
+    if (baseUrl.includes('amity.edu/gurugram') || baseUrl.includes('amity.edu/gurgaon')) {
+      return [
+        'https://www.amity.edu/gurugram/',                    // Homepage (has overview data)
+        'https://www.amity.edu/gurugram/btech',              // BTech programs
+        'https://www.amity.edu/gurugram/placement',          // Placements
+        'https://www.amity.edu/gurugram/admission',          // Admissions
+        'https://www.amity.edu/gurugram/fees',               // Fees
+        'https://www.amity.edu/gurugram/about',              // About
+        'https://www.amity.edu/gurugram/campus',             // Campus/Infrastructure
+        'https://www.amity.edu/gurugram/accreditation',      // Accreditation
+      ];
+    }
+    else if (baseUrl.includes('sgtuniversity')) {
+  return [
+    'https://sgtuniversity.ac.in/',
+    'https://sgtuniversity.ac.in/engineering/training-and-placement',
+    'https://admission.sgtuniversity.ac.in/',
+    // 'https://sgtuniversity.ac.in/about/',
+    // 'https://sgtuniversity.ac.in/campus/',
+    // 'https://sgtuniversity.ac.in/academics/',
+  ];
+}
+
+    // Generic pattern - try common URL structures
+    // Most colleges use one of these patterns
+    const commonPaths = [
+      'placement',
+      'placements', 
+      'career',
+      'admission',
+      'admissions',
+      'fees',
+      'fee-structure',
+      'about',
+      'about-us',
+      'infrastructure',
+      'campus',
+      'facilities',
+      'faculty',
+      'ranking',
+      'nirf',
+      'accreditation',
+      'naac',
+    ];
+
+    // Build URLs with the base URL
+    const urls: string[] = [];
+    
+    // Add base URL itself first (homepage often has data)
+    urls.push(baseUrl);
+    
+    // Add common paths
+    commonPaths.forEach(path => {
+      urls.push(`${baseUrl}/${path}`);
+    });
+
+    // Limit to 8 URLs to avoid overwhelming the scraper
+    return urls.slice(0, 8);
+  }
+
+  private detectPageType(url: string): string {
+    const urlLower = url.toLowerCase();
+
+    if (urlLower.includes('placement')) return 'placements';
+    if (urlLower.includes('admission')) return 'admissions';
+    if (urlLower.includes('fee')) return 'fees';
+    if (urlLower.includes('about')) return 'about';
+    if (urlLower.includes('infrastructure') || urlLower.includes('facilities'))
+      return 'infrastructure';
+    if (urlLower.includes('faculty')) return 'faculty';
+    if (urlLower.includes('ranking') || urlLower.includes('nirf')) return 'rankings';
+    if (urlLower.includes('accreditation') || urlLower.includes('naac'))
+      return 'accreditation';
+
+    return 'other';
+  }
+
 
 
 

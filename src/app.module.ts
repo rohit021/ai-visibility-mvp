@@ -6,7 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { CollegesModule } from './colleges/colleges.module';
 import { PromptsModule } from './prompts/prompts.module';
 import { AiEngineModule } from './ai-engine/ai-engine.module';
-// import { AnalyticsModule } from './analytics/analytics.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 // import { DashboardModule } from './dashboard/dashboard.module';
 // import { RecommendationsModule } from './recommendations/recommendations.module';
 
@@ -39,7 +39,7 @@ import { AiEngineModule } from './ai-engine/ai-engine.module';
     CollegesModule,
     PromptsModule,
     AiEngineModule,
-    // AnalyticsModule,
+    AnalyticsModule,
     // DashboardModule,
     // RecommendationsModule,
   ],

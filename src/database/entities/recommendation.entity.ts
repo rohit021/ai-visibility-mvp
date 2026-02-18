@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { College } from './college.entity';
 
@@ -14,46 +15,41 @@ export class Recommendation {
   @PrimaryGeneratedColumn()
   id: number;
 
+  // ── Foreign Key ───────────────────────────────────────────────────────────
+  @Index()
   @Column({ name: 'college_id' })
   collegeId: number;
 
+  // ── Recommendation Details ────────────────────────────────────────────────
   @Column({
     type: 'enum',
     enum: ['high', 'medium', 'low'],
+    default: 'medium',
   })
   priority: 'high' | 'medium' | 'low';
 
+  @Index()
   @Column({ length: 100 })
-  category: string;
+  category: string; // placements, fees, visibility, etc.
 
   @Column({ type: 'text' })
-  issue: string;
+  issue: string; // What's the problem?
 
   @Column({ type: 'text' })
-  recommendation: string;
+  recommendation: string; // What should they do?
 
   @Column({ name: 'root_cause', type: 'text', nullable: true })
-  rootCause: string;
+  rootCause: string | null; // Why does this problem exist?
 
   @Column({ name: 'expected_impact', length: 255, nullable: true })
-  expectedImpact: string;
+  expectedImpact: string | null; // "+15% completeness score"
 
-  @Column({ name: 'impact_score', type: 'decimal', precision: 5, scale: 2, nullable: true })
-  impactScore: number;
+  @Column({ name: 'impact_score', type: 'int', nullable: true })
+  impactScore: number | null; // Numeric score for sorting
 
-  @Column({ name: 'affected_queries', type: 'json', nullable: true })
-  affectedQueries: string[];
-
-  @Column({ name: 'competitor_reference', type: 'json', nullable: true })
-  competitorReference: {
-    name: string;
-    strength: string;
-    theirRank: number;
-    yourRank: number;
-  }[];
-
+  // ── Implementation Details ────────────────────────────────────────────────
   @Column({ name: 'implementation_steps', type: 'json', nullable: true })
-  implementationSteps: string[];
+  implementationSteps: string[] | null;
 
   @Column({
     name: 'estimated_effort',
@@ -61,11 +57,17 @@ export class Recommendation {
     enum: ['low', 'medium', 'high'],
     nullable: true,
   })
-  estimatedEffort: 'low' | 'medium' | 'high';
+  estimatedEffort: 'low' | 'medium' | 'high' | null;
 
-  @Column({ name: 'estimated_time_days', nullable: true })
-  estimatedTimeDays: number;
+  @Column({ name: 'estimated_time_days', type: 'int', nullable: true })
+  estimatedTimeDays: number | null;
 
+  // ── Competitor Reference ──────────────────────────────────────────────────
+  @Column({ name: 'competitor_reference', type: 'json', nullable: true })
+  competitorReference: any[] | null; // Array of competitor data
+
+  // ── Status ────────────────────────────────────────────────────────────────
+  @Index()
   @Column({
     type: 'enum',
     enum: ['open', 'in_progress', 'completed', 'dismissed'],
@@ -73,25 +75,24 @@ export class Recommendation {
   })
   status: 'open' | 'in_progress' | 'completed' | 'dismissed';
 
-  @Column({ name: 'validation_status', type: 'enum', enum: ['pending', 'validated', 'not_validated'], default: 'pending' })
-  validationStatus: 'pending' | 'validated' | 'not_validated';
+  @Column({ name: 'completed_at', type: 'timestamp', nullable: true })
+  completedAt: Date | null;
 
-  @Column({ name: 'visibility_before', type: 'decimal', precision: 5, scale: 2, nullable: true })
-  visibilityBefore: number;
+  @Column({ name: 'dismissed_at', type: 'timestamp', nullable: true })
+  dismissedAt: Date | null;
 
-  @Column({ name: 'visibility_after', type: 'decimal', precision: 5, scale: 2, nullable: true })
-  visibilityAfter: number;
+  @Column({ name: 'dismissal_reason', type: 'text', nullable: true })
+  dismissalReason: string | null;
 
+  // ── Timestamps ────────────────────────────────────────────────────────────
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
-  @Column({ name: 'completed_at', type: 'timestamp', nullable: true })
-  completedAt: Date;
-
-  @ManyToOne(() => College)
+  // ── Relations ─────────────────────────────────────────────────────────────
+  @ManyToOne(() => College, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'college_id' })
   college: College;
 }

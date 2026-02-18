@@ -1,86 +1,142 @@
-// import {
-//   Controller,
-//   Get,
-//   Post,
-//   Param,
-//   Query,
-//   UseGuards,
-//   ParseIntPipe,
-// } from '@nestjs/common';
-// import { AnalyticsService } from './analytics.service';
-// import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-// import { CurrentUser } from '../auth/decorators/current-user.decorator';
-// import { InjectRepository } from '@nestjs/typeorm';
-// import { Repository } from 'typeorm';
-// import { College } from '../database/entities/college.entity';
+import {
+  Controller,
+  Get,
+  Param,
+  UseGuards,
+  ParseIntPipe,
+  NotFoundException,
+  Logger,
+} from '@nestjs/common';
+import { DashboardService } from './services/dashboard.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { CollegeSubscription } from '../database/entities/college-subscription.entity';
+import { GapsAnalyzerService } from './services/gaps-analyzer.service';
+import { RecommendationsService } from './services/recommendations.service';
+import { CompetitorAnalyzerService } from './services/competitor-analyzer.service'
 
-// @Controller('analytics')
-// @UseGuards(JwtAuthGuard)
-// export class AnalyticsController {
-//   constructor(
-//     private analyticsService: AnalyticsService,
-//     @InjectRepository(College)
-//     private collegeRepo: Repository<College>,
-//   ) {}
+@Controller('analytics')
+@UseGuards(JwtAuthGuard)
+export class AnalyticsController {
+  private readonly logger = new Logger(AnalyticsController.name);
 
-//   @Get('visibility-score/:collegeId')
-//   async getVisibilityScore(
-//     @Param('collegeId', ParseIntPipe) collegeId: number,
-//     @CurrentUser() user: any,
-//   ) {
-//     // Verify ownership
-//     const college = await this.collegeRepo.findOne({
-//       where: { id: collegeId, userId: user.userId },
-//     });
+  constructor(
+    private dashboardService: DashboardService,
+    @InjectRepository(CollegeSubscription)
+    private subscriptionRepo: Repository<CollegeSubscription>,
+    private gapsAnalyzerService: GapsAnalyzerService,
+    private recommendationsService: RecommendationsService,
+    private competitorAnalyzerService: CompetitorAnalyzerService,
+  ) {}
 
-//     if (!college) {
-//       throw new Error('College not found or access denied');
-//     }
+  /**
+   * GET /analytics/dashboard/:collegeId
+   * 
+   * Returns complete dashboard overview including:
+   * - Visibility metrics (Layer 1)
+   * - AI knowledge completeness (Layer 3)
+   * - Competitive position (Layer 2)
+   * - Recent trends
+   */
+  @Get('dashboard/:collegeId')
+  async getDashboardOverview(
+    @Param('collegeId', ParseIntPipe) collegeId: number,
+    @CurrentUser() user: any,
+  ) {
+    // Verify user has access to this college
+    // await this.verifyAccess(collegeId, user.userId);
 
-//     return this.analyticsService.getLatestScore(collegeId);
-//   }
+    const overview = await this.dashboardService.getOverview(collegeId);
 
-//   @Get('trends/:collegeId')
-//   async getTrends(
-//     @Param('collegeId', ParseIntPipe) collegeId: number,
-//     @CurrentUser() user: any,
-//     @Query('weeks') weeks: number = 12,
-//   ) {
-//     // Verify ownership
-//     const college = await this.collegeRepo.findOne({
-//       where: { id: collegeId, userId: user.userId },
-//     });
+    return {
+      success: true,
+      data: overview,
+    };
+  }
 
-//     if (!college) {
-//       throw new Error('College not found or access denied');
-//     }
 
-//     return this.analyticsService.getTrendData(collegeId, weeks);
-//   }
+  @Get('gaps/:collegeId')
+  async getDetailedGaps(
+    @Param('collegeId', ParseIntPipe) collegeId: number,
+    @CurrentUser() user: any,
+  ) {
+    // Verify user has access to this college
+    // await this.verifyAccess(collegeId, user.userId);
 
-//   @Post('calculate/:collegeId')
-//   async calculateScore(
-//     @Param('collegeId', ParseIntPipe) collegeId: number,
-//     @CurrentUser() user: any,
-//   ) {
-//     // Verify ownership
-//     const college = await this.collegeRepo.findOne({
-//       where: { id: collegeId, userId: user.userId },
-//     });
+    const gaps = await this.gapsAnalyzerService.analyzeGaps(collegeId);
 
-//     if (!college) {
-//       throw new Error('College not found or access denied');
-//     }
+    return {
+      success: true,
+      data: gaps,
+    };
+  }
 
-//     // Calculate for current week
-//     const now = new Date();
-//     const weekStart = new Date(now);
-//     weekStart.setDate(now.getDate() - 7);
 
-//     return this.analyticsService.calculateScoreForPeriod(
-//       collegeId,
-//       weekStart,
-//       now,
-//     );
-//   }
-// }
+
+  /**
+   * GET /analytics/recommendations/:collegeId
+   * 
+   * Returns auto-generated recommendations based on gaps:
+   * - High/medium/low priority recommendations
+   * - Implementation steps
+   * - Expected impact
+   * - Competitor references
+   */
+  @Get('recommendations/:collegeId')
+  async getRecommendations(
+    @Param('collegeId', ParseIntPipe) collegeId: number,
+    @CurrentUser() user: any,
+  ) {
+    // Verify user has access to this college
+    // await this.verifyAccess(collegeId, user.userId);
+
+    const recommendations = await this.recommendationsService.getRecommendations(collegeId);
+
+    return {
+      success: true,
+      data: recommendations,
+    };
+  }
+
+  /**
+   * GET /analytics/competitors/:collegeId
+   * 
+   * Returns detailed competitor comparison:
+   * - Your rank among competitors
+   * - Head-to-head feature battles
+   * - Gap analysis vs each competitor
+   * - Visibility rankings
+   */
+  @Get('competitors/:collegeId')
+  async getCompetitorAnalysis(
+    @Param('collegeId', ParseIntPipe) collegeId: number,
+    @CurrentUser() user: any,
+  ) {
+    // Verify user has access to this college
+    await this.verifyAccess(collegeId, user.userId);
+
+    const analysis = await this.competitorAnalyzerService.analyzeCompetitors(collegeId);
+
+    return {
+      success: true,
+      data: analysis,
+    };
+  }
+
+
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Helper: Verify user has subscription for this college
+  // ─────────────────────────────────────────────────────────────────────────
+  private async verifyAccess(collegeId: number, userId: number): Promise<void> {
+    const subscription = await this.subscriptionRepo.findOne({
+      where: { userId, collegeId, isActive: true },
+    });
+
+    if (!subscription) {
+      throw new NotFoundException('You do not have access to this college');
+    }
+  }
+}

@@ -18,6 +18,8 @@ import { FeatureComparison } from '../database/entities/feature-comparison.entit
 import { DetailParserService } from './services/detail.parser.service';
 import { CollegeAiProfile } from '@/database/entities/college-ai-profiles.entity';
 import { CollegeAiProfileHistory } from '@/database/entities/college-ai-profile-history.entity';
+import { CollegeWebsiteScrape } from '@/database/entities/college-website-scrap.entity';
+import { CollegeScrapedPage } from '@/database/entities/college-scraped-pages.entity';
 
 
 @Module({
@@ -34,7 +36,9 @@ import { CollegeAiProfileHistory } from '@/database/entities/college-ai-profile-
       CitationSource,
       FeatureComparison,
       CollegeAiProfile,
-      CollegeAiProfileHistory
+      CollegeAiProfileHistory,
+      CollegeWebsiteScrape,
+      CollegeScrapedPage
 
     ]),
   ],

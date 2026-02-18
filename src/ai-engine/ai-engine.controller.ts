@@ -306,5 +306,44 @@ export class AiEngineController {
         'You do not have access to this college',
       );
     }
+  
   }
+
+
+  @Post('execute-scrape/:collegeId')
+  async executeScrape(
+    @Param('collegeId', ParseIntPipe) collegeId: number,
+    @CurrentUser() user: any,
+  ) {
+    // Verify user has active subscription
+    // const subscription = await this.subscriptionRepo.findOne({
+    //   where: { userId: user.userId, collegeId, isActive: true },
+    // });
+
+    // if (!subscription) {
+    //   throw new NotFoundException('You do not have an active subscription for this college');
+    // }
+
+    // if (subscription.status === 'expired' || subscription.status === 'cancelled') {
+    //   throw new ForbiddenException('Your subscription has expired. Please renew to scrape website.');
+    // }
+
+    try {
+      const result = await this.queryExecutor.scrapeCollegeWebsite(collegeId);
+
+      return {
+        success: true,
+        message: 'Website scraping completed',
+        data: result,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to scrape website: ${error.message}`);
+      throw new HttpException(
+        error.message || 'Failed to scrape website',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+
 }
